@@ -1,0 +1,1 @@
+$ErrorActionPreference="Stop";$root=Split-Path -Parent $PSScriptRoot;$env:PATH="$(Join-Path $root '.local\go\bin');$env:PATH";$env:GOMODCACHE=Join-Path $root ".local\cache\go-mod";$env:GOCACHE=Join-Path $root ".local\cache\go-build";Push-Location $root;try{go vet ./...;if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}}finally{Pop-Location}
