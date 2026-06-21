@@ -1,9 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
 # CodeRenga
 
 CodeRenga is a lightweight Go CLI coding agent implemented from the v0.8 design in `docs/`.
@@ -57,6 +51,7 @@ The `_windows_amd64.syso` suffix keeps the resource out of Linux and macOS build
 .\.local\bin\coderenga.exe --init
 .\.local\bin\coderenga.exe --cwd . "inspect this repository"
 .\.local\bin\coderenga.exe --cwd . --no-persist
+.\.local\bin\coderenga.exe --mode coder --non-interactive "implement the requested change"
 ```
 
 Only `--init` creates `coderenga.d/` beside the binary. An explicit `--state-dir` may create its SQLite state database. `--no-persist` always uses in-memory SQLite.
@@ -84,4 +79,10 @@ Tool calls use one JSON object with `tool` and `arguments`; XML-style tags are n
 
 
 Dry-run tool results explicitly report `executed=false`; contradictory model claims are not shown as the final answer. Greetings are answered without tools. Consecutive identical tool calls stop with the tool name, arguments, and prior result, while the eight-turn limit reports its call history. `--no-persist` uses only in-memory SQLite and does not touch the configured database file.
+
+
+
+
+
+The initial modes use `coder write:allow`, `debug write:confirm`, and `architect/reviewer write:false`. File-mutating tools remain constrained by the cwd sandbox and `tools.json`. `--non-interactive` runs allowed operations but fails confirmation-required operations without prompting or auto-approving them.
 

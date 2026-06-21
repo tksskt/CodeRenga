@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
 # CodeRenga Implementation Status
 
 The v0.8 implementation is organized into the requested phases:
@@ -16,5 +13,7 @@ The v0.8 implementation is organized into the requested phases:
 9. Active summaries, recent uncompacted messages, manual/automatic compaction, and raw-message retention.
 
 Implementation verification uses `scripts/fmt.ps1`, `scripts/lint.ps1`, `scripts/test.ps1`, and `scripts/build.ps1`.
+
+
 
 

@@ -1,9 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 # CodeRenga 詳細設計書 v0.8 - 03 Tool Extension Design
 
 ## 16. ツール拡張詳細設計
@@ -238,14 +232,14 @@ Plugin Tool は shell command policy とは別に Tool Policy を持つ。ただ
     "unknown": "confirm",
     "allow": [
       "builtin.read_file",
+      "builtin.write_file",
+      "builtin.apply_patch",
       "builtin.search_text",
       "git.status",
       "git.diff",
       "plugin.docker_ps"
     ],
     "confirm": [
-      "builtin.write_file",
-      "builtin.apply_patch",
       "shell.run",
       "plugin.restart_service"
     ],
@@ -271,6 +265,10 @@ block > confirm > unknown > allow
 ```
 
 下位層は上位層の判定を緩和できない。たとえば mode が `block` を返した場合、tool_policy や Tool manifest が `allow` を返しても最終判定は `block` とする。tool_policy が `confirm` を返し、manifest が `allow` を返した場合も、最終判定は `confirm` とする。
+
+書き込み系Builtin Toolは `FileMutator` を実装し、mode frontmatterの `write` 判定へ参加する。Builtin固有policyはallowを中立値とし、初期 `tools.json` もwrite/applyをallowとする。coder modeのwrite:allowと組み合わせた場合だけ確認なしとなり、debugのconfirm、architect/reviewerのfalse、tools.jsonのblockが優先される。
+
+`--non-interactive` はconfirm/unknownを自動承認しない。確認が必要な場合はpromptを表示せず、Tool名を含む `ConfirmationRequiredError` で停止する。
 
 `shell.run` では、shell_policy がセグメントごとの最大危険度を返し、その結果も同じ集約規則に参加する。Plugin Tool では、mode、tool_policy、manifest、sandbox 要件、unknown fallback の最大危険度を採用する。
 
@@ -455,6 +453,10 @@ v0.2 以降で拡張する。
 - args / env input_mode
 - plugin enable / disable 管理
 - plugin package import / export
+
+
+
+
 
 
 

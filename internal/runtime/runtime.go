@@ -24,7 +24,7 @@ import (
 
 type Options struct {
 	BinaryDir, CWD, ConfigPath, StateDir, Mode, Profile, Model string
-	NoPersist, DryRun                                          bool
+	NoPersist, DryRun, NonInteractive                          bool
 }
 type Runtime struct {
 	Config                                          config.Config
@@ -75,6 +75,12 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 		return nil, e
 	}
 	rt := &Runtime{Config: cfg, Prompts: pm, Store: store, Registry: tools.NewRegistry(), LLM: llm.New(), CWD: o.CWD, BinaryDir: o.BinaryDir, Mode: mode, Profile: profile, Model: model, SessionID: fmt.Sprintf("%d", time.Now().UnixNano()), DryRun: o.DryRun, MCP: map[string]mcp.Client{}}
+	initialized := false
+	defer func() {
+		if !initialized {
+			rt.Close()
+		}
+	}()
 	if e = builtin.Register(rt.Registry); e != nil {
 		return nil, e
 	}
@@ -86,7 +92,7 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	}
 	rt.loadPlugins()
 	rt.loadMCP(ctx)
-	rt.Executor = &tools.Executor{Registry: rt.Registry, Store: store, PolicyDecision: func(name string) tools.Level {
+	rt.Executor = &tools.Executor{Registry: rt.Registry, Store: store, NonInteractive: o.NonInteractive, PolicyDecision: func(name string) tools.Level {
 		value, configured := cfg.ToolPolicies[name]
 		if !configured {
 			return tools.Allow
@@ -101,6 +107,7 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	if e = store.CreateSession(ctx, rt.SessionID, o.CWD, mode, profile); e != nil {
 		return nil, e
 	}
+	initialized = true
 	return rt, nil
 }
 func first(v, d string) string {
@@ -115,17 +122,24 @@ func (rt *Runtime) Close() {
 	}
 	_ = rt.Store.Close()
 }
-func (rt *Runtime) modeDecision(mode, name string) tools.Level {
-	m, e := rt.Prompts.Mode(mode)
-	if e != nil {
+func (rt *Runtime) modeDecision(mode string, tool tools.Tool) tools.Level {
+	m, err := rt.Prompts.Mode(mode)
+	if err != nil {
 		return tools.Unknown
 	}
-	if strings.HasPrefix(name, "builtin.write") || name == "builtin.apply_patch" {
-		if m.Write == "false" {
+	if mutator, ok := tool.(tools.FileMutator); ok && mutator.ModifiesFiles() {
+		switch strings.ToLower(strings.TrimSpace(m.Write)) {
+		case "allow", "true":
+			return tools.Allow
+		case "confirm":
+			return tools.Confirm
+		case "false", "block", "deny":
 			return tools.Block
+		default:
+			return tools.Unknown
 		}
-		return tools.Confirm
 	}
+	name := tool.Name()
 	if name == "shell.run" && m.Shell == "allow_readonly" {
 		return tools.Confirm
 	}
@@ -234,7 +248,7 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 			if _, err = rt.addMessage(ctx, "user", toolResult); err != nil {
 				return err
 			}
-			if rt.DryRun && isSideEffectTool(call.Name) {
+			if rt.DryRun && rt.isSideEffectTool(call.Name) {
 				dryRunSkipped = append(dryRunSkipped, call)
 				fmt.Fprintf(out, "[dry-run] %s\n", call.Name)
 				printToolArguments(out, call.Arguments)
@@ -325,8 +339,13 @@ func casualResponse(instruction string) string {
 	return "Hello! How can I help with your coding task?"
 }
 
-func isSideEffectTool(name string) bool {
-	return name == "builtin.write_file" || name == "builtin.apply_patch" || name == "shell.run" || strings.HasPrefix(name, "plugin.") || strings.HasPrefix(name, "mcp.")
+func (rt *Runtime) isSideEffectTool(name string) bool {
+	if tool, ok := rt.Registry.Info(name); ok {
+		if mutator, ok := tool.(tools.FileMutator); ok && mutator.ModifiesFiles() {
+			return true
+		}
+	}
+	return name == "shell.run" || strings.HasPrefix(name, "plugin.") || strings.HasPrefix(name, "mcp.")
 }
 func (rt *Runtime) context(ctx context.Context) ([]llm.Message, error) {
 	out := []llm.Message{{Role: "system", Content: rt.systemPrompt()}}

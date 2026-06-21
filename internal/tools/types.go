@@ -62,6 +62,9 @@ type Tool interface {
 	Policy() Level
 	Execute(context.Context, Request) (Result, error)
 }
+type FileMutator interface {
+	ModifiesFiles() bool
+}
 type Registry struct {
 	mu       sync.RWMutex
 	items    map[string]Tool

@@ -11,8 +11,8 @@ import (
 var ErrHelp = errors.New("help requested")
 
 type Options struct {
-	CWD, ConfigPath, StateDir, Mode, Profile, Model, Instruction string
-	Init, ShowVersion, NoPersist, DryRun, ReadStdin              bool
+	CWD, ConfigPath, StateDir, Mode, Profile, Model, Instruction    string
+	Init, ShowVersion, NoPersist, DryRun, ReadStdin, NonInteractive bool
 }
 
 func Parse(args []string, out io.Writer) (Options, error) {
@@ -30,6 +30,7 @@ func Parse(args []string, out io.Writer) (Options, error) {
 	set.BoolVar(&o.ShowVersion, "version", false, "print version")
 	set.BoolVar(&o.NoPersist, "no-persist", false, "disable persistent storage")
 	set.BoolVar(&o.DryRun, "dry-run", false, "do not modify project files")
+	set.BoolVar(&o.NonInteractive, "non-interactive", false, "fail instead of prompting for confirmation")
 	set.BoolVar(&o.ReadStdin, "stdin", false, "append stdin to instruction")
 	help := set.Bool("help", false, "print help")
 	if e := set.Parse(args); e != nil {
@@ -62,6 +63,7 @@ Usage: coderenga [options] [instruction]
   --stdin            Append standard input
   --no-persist       Use in-memory storage
   --dry-run          Do not modify project files
+  --non-interactive  Fail instead of prompting for confirmation
   --init             Create coderenga.d next to executable
   --version          Print version
   --help             Print help`)

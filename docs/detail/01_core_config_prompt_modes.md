@@ -1,9 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 # CodeRenga 詳細設計書 v0.8 - 01 Core / Config / Prompt / Modes
 
 > 設定ファイル分割、埋め込み初期化、JSON Tool Callについては `04_embedded_init_split_config_tool_calls.md` が本書の2章、3章、7章に優先する。
@@ -126,7 +120,7 @@ internal/
 `tools.json`:
 
 ```json
-{"version":1,"policies":{"builtin.read_file":"allow","builtin.write_file":"confirm","builtin.apply_patch":"confirm","shell.run":"confirm","git.status":"allow","git.diff":"allow"},"plugins":{}}
+{"version":1,"policies":{"builtin.read_file":"allow","builtin.write_file":"allow","builtin.apply_patch":"allow","shell.run":"confirm","git.status":"allow","git.diff":"allow"},"plugins":{}}
 ```
 
 ## 3. プロンプト設計
@@ -196,12 +190,12 @@ AGENTS.md
       "plan_first": true
     },
     "coder": {
-      "description": "実装を行う。書き込みは確認後に許可。",
+      "description": "実装workerとして実装を行う。cwd内の書き込みを許可する。",
       "prompt_file": "<binary-dir>/coderenga.d/modes/coder.md",
       "profile": "devstral",
       "permissions": {
         "read": true,
-        "write": "confirm",
+        "write": "allow",
         "shell": "policy",
         "mcp": true
       },
@@ -231,7 +225,18 @@ plan_first: false
 原則としてファイル編集は行わず、修正案を提示してください。
 ```
 
-### 5.2 モード切り替え
+### 5.2 初期modeのwrite policy
+
+| mode | write | 用途 |
+|---|---|---|
+| coder | allow | 親エージェントから呼ばれる実装worker。cwd内のFileMutatorを確認なしで許可 |
+| debug | confirm | 人間が確認しながら行う調査と最小修正 |
+| architect | false | 調査・設計専用。FileMutatorをBlock |
+| reviewer | false | レビュー専用。FileMutatorをBlock |
+
+`write` は `FileMutator` を実装するToolに適用する。`shell.run` は対象外で、shell policyと`tools.json`に従う。最終判断は `block > confirm > unknown > allow` の最大危険度であり、modeの `write:false` と `tools.json:block` は他のallowで緩和できない。
+
+### 5.3 モード切り替え
 
 CLI:
 
@@ -499,6 +504,10 @@ MCP tool も通常 tool と同様に承認ポリシーを適用できる。
 /summary show              active summary 表示
 /db status                 DB状態表示
 ```
+
+
+
+
 
 
 

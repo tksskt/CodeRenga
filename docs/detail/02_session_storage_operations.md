@@ -1,9 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
 # CodeRenga 詳細設計書 v0.8 - 02 Session / Storage / Operations
 
 ## 12. セッション管理と SQLite Storage
@@ -270,6 +264,8 @@ DB 化により以下をサポートする。
 - shell 実行をユーザーが制御できること
 - プロンプトとモードをユーザーが自由に差し替えられること
 - MCP サーバー追加時に本体の再ビルドが不要であること
+
+
 
 
 

@@ -14,19 +14,27 @@ import (
 )
 
 type fileTool struct {
-	name   string
-	policy tools.Level
-	run    func(context.Context, tools.Request) (tools.Result, error)
+	name     string
+	policy   tools.Level
+	modifies bool
+	run      func(context.Context, tools.Request) (tools.Result, error)
 }
 
 func (t fileTool) Name() string        { return t.name }
 func (t fileTool) Description() string { return t.name }
 func (t fileTool) Policy() tools.Level { return t.policy }
+func (t fileTool) ModifiesFiles() bool { return t.modifies }
 func (t fileTool) Execute(c context.Context, r tools.Request) (tools.Result, error) {
 	return t.run(c, r)
 }
 func Register(r *tools.Registry) error {
-	for _, t := range []tools.Tool{fileTool{"builtin.read_file", tools.Allow, read}, fileTool{"builtin.write_file", tools.Confirm, write}, fileTool{"builtin.apply_patch", tools.Confirm, applyPatch}, fileTool{"builtin.list_files", tools.Allow, list}, fileTool{"builtin.search_text", tools.Allow, search}} {
+	for _, t := range []tools.Tool{
+		fileTool{name: "builtin.read_file", policy: tools.Allow, run: read},
+		fileTool{name: "builtin.write_file", policy: tools.Allow, modifies: true, run: write},
+		fileTool{name: "builtin.apply_patch", policy: tools.Allow, modifies: true, run: applyPatch},
+		fileTool{name: "builtin.list_files", policy: tools.Allow, run: list},
+		fileTool{name: "builtin.search_text", policy: tools.Allow, run: search},
+	} {
 		if e := r.Register(t); e != nil {
 			return e
 		}

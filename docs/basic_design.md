@@ -1,9 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
-Exit code: 0
-Wall time: 0.2 seconds
-Output:
 # CodeRenga 基本設計書 v0.8
 
 ## 1. 目的
@@ -386,6 +380,14 @@ CodeRenga は外部ファイルからプロンプトを読み込む。
 - plan-first 強制の有無
 
 
+### 13.1 初期mode policy
+
+- coder: `write: allow`。親エージェントから呼ばれる実装worker
+- debug: `write: confirm`。人間確認付きの調査・最小修正
+- architect / reviewer: `write: false`。ファイル変更をBlock
+
+書き込み権限はFileMutatorメタデータ、mode frontmatter、`tools.json`を最大危険度で集約する。`shell.run`はwriteとは分離する。`--non-interactive`ではconfirmを自動承認せず、promptなしのエラーとして停止する。
+
 ## 14. セッション履歴と SQLite DB
 
 CodeRenga は、セッション履歴を JSONL ファイル中心ではなく SQLite DB に保存する。DB はデフォルトで `<binary-dir>/coderenga.d/coderenga.db` とする。
@@ -503,6 +505,10 @@ v0.1 で後回しにするもの:
 - Docker sandbox
 - 複数エージェント並列実行
 - 高度な RAG
+
+
+
+
 
 
 

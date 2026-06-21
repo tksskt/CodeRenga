@@ -67,7 +67,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, a Options) in
 		}
 		instruction = strings.TrimSpace(instruction + "\n" + string(b))
 	}
-	rt, err := coderengaruntime.New(context.Background(), coderengaruntime.Options{BinaryDir: bin, CWD: cwd, ConfigPath: o.ConfigPath, StateDir: o.StateDir, Mode: o.Mode, Profile: o.Profile, Model: o.Model, NoPersist: o.NoPersist, DryRun: o.DryRun})
+	rt, err := coderengaruntime.New(context.Background(), coderengaruntime.Options{BinaryDir: bin, CWD: cwd, ConfigPath: o.ConfigPath, StateDir: o.StateDir, Mode: o.Mode, Profile: o.Profile, Model: o.Model, NoPersist: o.NoPersist, DryRun: o.DryRun, NonInteractive: o.NonInteractive})
 	if err != nil {
 		printStartupError(stderr, err)
 		return 1

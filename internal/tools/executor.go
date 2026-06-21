@@ -12,12 +12,20 @@ import (
 
 type Approver func(string, map[string]any) bool
 type RequestPolicy interface{ Decision(Request) Level }
+
+type ConfirmationRequiredError struct{ Tool string }
+
+func (e ConfirmationRequiredError) Error() string {
+	return fmt.Sprintf("operation requires confirmation, but --non-interactive is enabled.\ntool: %s", e.Tool)
+}
+
 type Executor struct {
 	Registry       *Registry
 	Store          *storage.Store
 	Approver       Approver
-	ModeDecision   func(string, string) Level
+	ModeDecision   func(string, Tool) Level
 	PolicyDecision func(string) Level
+	NonInteractive bool
 }
 
 func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
@@ -30,24 +38,29 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 		levels = append(levels, e.PolicyDecision(req.Name))
 	}
 	if e.ModeDecision != nil {
-		levels = append(levels, e.ModeDecision(req.Context.Mode, req.Name))
+		levels = append(levels, e.ModeDecision(req.Context.Mode, t))
 	}
 	if dynamic, ok := t.(RequestPolicy); ok {
 		levels = append(levels, dynamic.Decision(req))
 	}
 	decision := Max(levels...)
-	if req.Context.DryRun && hasSideEffects(req.Name) {
-		res := dryRunResult(req)
-		e.record(ctx, req, res, decision, false, 0)
-		return res, nil
-	}
-	approved := decision == Allow
 	if decision == Block {
 		res := Result{OK: false, Error: "tool blocked by policy"}
 		e.record(ctx, req, res, decision, false, 0)
 		return res, nil
 	}
+	if req.Context.DryRun && hasSideEffects(t) {
+		res := dryRunResult(req)
+		e.record(ctx, req, res, decision, false, 0)
+		return res, nil
+	}
+	approved := decision == Allow
 	if decision == Confirm || decision == Unknown {
+		if e.NonInteractive {
+			res := Result{OK: false, Error: "operation requires confirmation in non-interactive mode"}
+			e.record(ctx, req, res, decision, false, 0)
+			return res, ConfirmationRequiredError{Tool: req.Name}
+		}
 		if e.Approver == nil || !e.Approver(req.Name, req.Arguments) {
 			res := Result{OK: false, Error: "tool execution was not approved"}
 			e.record(ctx, req, res, decision, false, 0)
@@ -84,8 +97,12 @@ func (e *Executor) record(ctx context.Context, req Request, res Result, decision
 	_ = e.Store.ToolRunDetailed(ctx, req.Context.SessionID, req.Name, strings.Split(req.Name, ".")[0], string(b), res.Content, map[bool]string{true: "ok", false: "failed"}[res.OK], decision.String(), approved, duration)
 }
 
-func hasSideEffects(name string) bool {
-	return name == "builtin.write_file" || name == "builtin.apply_patch" || name == "shell.run" || strings.HasPrefix(name, "plugin.") || strings.HasPrefix(name, "mcp.")
+func hasSideEffects(tool Tool) bool {
+	if mutator, ok := tool.(FileMutator); ok && mutator.ModifiesFiles() {
+		return true
+	}
+	name := tool.Name()
+	return name == "shell.run" || strings.HasPrefix(name, "plugin.") || strings.HasPrefix(name, "mcp.")
 }
 
 func dryRunResult(req Request) Result {

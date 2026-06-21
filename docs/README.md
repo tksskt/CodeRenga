@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
 # CodeRenga Markdown 分割版 v0.8
 
 このディレクトリは、Markdown ソースを 1 ファイル 600 行以内に収めるために分割した版です。v0.8 では DOCX/PDF は生成・同梱しません。
@@ -20,5 +17,7 @@ Output:
 - Markdown は 1 ファイル 600 行以内を維持する。
 - DOCX/PDF は生成しない。必要になった場合のみ別タスクとして生成する。
 - 詳細設計を追加する場合は `detail/04_*.md` のように章単位で分割する。
+
+
 
 
