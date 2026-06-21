@@ -1,5 +1,7 @@
 # CodeRenga
 
+[English](README.md) | [日本語](README.ja.md)
+
 CodeRenga is a lightweight Go CLI coding agent implemented from the v0.8 design in `docs/`.
 
 ## Name and concept
