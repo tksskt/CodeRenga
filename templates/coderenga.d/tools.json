@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "policies": {
+    "builtin.read_file": "allow",
+    "builtin.write_file": "allow",
+    "builtin.apply_patch": "allow",
+    "shell.run": "confirm",
+    "git.status": "allow",
+    "git.diff": "allow"
+  },
+  "plugins": {}
+}

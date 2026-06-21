@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "defaultMode": "coder",
+  "defaultProfile": "local",
+  "state": {
+    "database": "coderenga.db"
+  }
+}
