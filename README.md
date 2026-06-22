@@ -88,3 +88,6 @@ Dry-run tool results explicitly report `executed=false`; contradictory model cla
 
 The initial modes use `coder write:allow`, `debug write:confirm`, and `architect/reviewer write:false`. File-mutating tools remain constrained by the cwd sandbox and `tools.json`. `--non-interactive` runs allowed operations but fails confirmation-required operations without prompting or auto-approving them.
 
+## License
+
+MIT License. See [LICENSE](LICENSE).

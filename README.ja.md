@@ -124,3 +124,7 @@ architect/reviewer write:false
 ファイルを変更するツールは、引き続き cwd サンドボックスと `tools.json` によって制約されます。
 
 `--non-interactive` は許可済みの操作を実行しますが、確認が必要な操作はプロンプト表示や自動承認を行わずに失敗します。
+
+## ライセンス
+
+MIT License です。詳細は [LICENSE](LICENSE) を参照してください。
