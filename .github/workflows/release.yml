@@ -24,7 +24,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./...
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
 
       - name: Build Linux amd64
         shell: bash
@@ -33,6 +36,12 @@ jobs:
           mkdir -p dist/linux-amd64
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/linux-amd64/coderenga ./cmd/coderenga
           tar -C dist/linux-amd64 -czf dist/coderenga-linux-amd64.tar.gz coderenga
+
+      - name: Smoke test Linux binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./dist/linux-amd64/coderenga --help
 
       - name: Upload Linux asset
         uses: actions/upload-artifact@v4
@@ -55,7 +64,8 @@ jobs:
 
       - name: Test
         shell: pwsh
-        run: go test ./...
+        run: |
+          go test ./...
 
       - name: Build Windows amd64
         shell: pwsh
@@ -64,7 +74,7 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o dist\windows-amd64\coderenga.exe ./cmd/coderenga
           Compress-Archive -Path dist\windows-amd64\coderenga.exe -DestinationPath dist\coderenga-windows-amd64.zip -Force
 
-      - name: Smoke test exe
+      - name: Smoke test Windows binary
         shell: pwsh
         run: |
           .\dist\windows-amd64\coderenga.exe --help
@@ -105,7 +115,9 @@ jobs:
 
       - name: Show assets
         shell: bash
-        run: ls -la dist
+        run: |
+          set -euo pipefail
+          ls -la dist
 
       - name: Create release
         uses: softprops/action-gh-release@v2
