@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-ubuntu:
+    name: Test on Ubuntu GARM runner
+    runs-on: [self-hosted, ubuntu]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+  test-windows:
+    name: Test on Windows GARM runner
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        shell: pwsh
+        run: go test ./...
+
+      - name: Build exe on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          go build -trimpath -ldflags="-s -w" -o dist/coderenga.exe ./cmd/coderenga
+
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          .\dist\coderenga.exe --help
+
+  build-release-assets:
+    name: Build release assets
+    needs:
+      - test-ubuntu
+      - test-windows
+    runs-on: [self-hosted, ubuntu]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build Linux amd64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/linux-amd64
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/linux-amd64/coderenga ./cmd/coderenga
+          tar -C dist/linux-amd64 -czf dist/coderenga-linux-amd64.tar.gz coderenga
+
+      - name: Build Windows amd64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/windows-amd64
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/windows-amd64/coderenga.exe ./cmd/coderenga
+          cd dist/windows-amd64
+          zip -9 ../coderenga-windows-amd64.zip coderenga.exe
+
+      - name: Create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum coderenga-linux-amd64.tar.gz coderenga-windows-amd64.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Upload release assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/coderenga-linux-amd64.tar.gz
+            dist/coderenga-windows-amd64.zip
+            dist/checksums.txt
+
+  release:
+    name: Create GitHub Release
+    needs:
+      - build-release-assets
+    runs-on: [self-hosted, ubuntu]
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Show assets
+        shell: bash
+        run: ls -la dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "CodeRenga ${GITHUB_REF_NAME}" \
+            --generate-notes
