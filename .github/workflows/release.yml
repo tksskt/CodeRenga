@@ -57,11 +57,25 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/linux-amd64/coderenga ./cmd/coderenga
           tar -C dist/linux-amd64 -czf dist/coderenga-linux-amd64.tar.gz coderenga
 
-      - name: Smoke test Linux binary
+      - name: Smoke test Linux archive
         shell: bash
         run: |
           set -euo pipefail
-          ./dist/linux-amd64/coderenga --help
+
+          mkdir -p dist/smoke-linux
+          tar -xzf dist/coderenga-linux-amd64.tar.gz -C dist/smoke-linux
+
+          ./dist/smoke-linux/coderenga --version
+          ./dist/smoke-linux/coderenga --help
+
+          (
+            cd dist/smoke-linux
+            ./coderenga --init
+            test -f coderenga.d/config.json
+            test -f coderenga.d/llm.json
+            test -f coderenga.d/mcp.json
+            test -f coderenga.d/tools.json
+          )
 
       - name: Upload Linux asset
         uses: actions/upload-artifact@v4
@@ -83,6 +97,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Resolve version
         shell: pwsh
@@ -105,10 +120,27 @@ jobs:
           go build -trimpath -ldflags="-X main.version=$env:VERSION" -o dist\windows-amd64\coderenga.exe ./cmd/coderenga
           Compress-Archive -Path dist\windows-amd64\coderenga.exe -DestinationPath dist\coderenga-windows-amd64.zip -Force
 
-      - name: Smoke test Windows binary
+      - name: Smoke test Windows archive
         shell: pwsh
         run: |
-          .\dist\windows-amd64\coderenga.exe --help
+          $ErrorActionPreference = "Stop"
+
+          New-Item -ItemType Directory -Force -Path dist\smoke-windows | Out-Null
+          Expand-Archive -Path dist\coderenga-windows-amd64.zip -DestinationPath dist\smoke-windows -Force
+
+          .\dist\smoke-windows\coderenga.exe --version
+          .\dist\smoke-windows\coderenga.exe --help
+
+          Push-Location dist\smoke-windows
+          try {
+            .\coderenga.exe --init
+            if (!(Test-Path .\coderenga.d\config.json)) { throw "missing coderenga.d/config.json" }
+            if (!(Test-Path .\coderenga.d\llm.json)) { throw "missing coderenga.d/llm.json" }
+            if (!(Test-Path .\coderenga.d\mcp.json)) { throw "missing coderenga.d/mcp.json" }
+            if (!(Test-Path .\coderenga.d\tools.json)) { throw "missing coderenga.d/tools.json" }
+          } finally {
+            Pop-Location
+          }
 
       - name: Upload Windows asset
         uses: actions/upload-artifact@v4
