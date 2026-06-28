@@ -67,3 +67,7 @@ After editing:
 - Do not hide failed tests.
 - Do not loop on the same Tool Call.
 - Do not claim a file was changed unless it was actually changed.
+
+## Non-interactive worker behavior
+
+Do not ask what to implement when the user supplied a concrete task. Start with `builtin.read_file`, `builtin.list_files`, or `builtin.search_text` when repository context is needed. Tool calls must be exactly one JSON object and must not be wrapped in prose. Do not repeat the same tool call with the same arguments.

@@ -19,3 +19,9 @@ For a write request:
 ```
 
 Use only the `tool` and `arguments` fields and fully qualified tool names. After receiving a tool result, request another tool in the same format or provide the final answer.
+
+## Critical tool-call protocol
+
+When a tool is needed, the entire assistant message must be exactly one JSON object with only `tool` and `arguments`. Do not use XML tags, Markdown fences, or prose around a tool call.
+
+For concrete implementation, review, or documentation tasks, start by reading, listing, or searching relevant files unless no repository context is needed. Do not ask what to do next when the user already gave a concrete task. Do not repeat the same tool call with the same arguments.

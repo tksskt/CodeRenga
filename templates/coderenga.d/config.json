@@ -4,5 +4,11 @@
   "defaultProfile": "local",
   "state": {
     "database": "coderenga.db"
+  },
+  "compact": {
+    "level": "normal",
+    "context_tokens": 4096,
+    "trigger_context_ratio": 0.75,
+    "trigger_turns": 30
   }
 }

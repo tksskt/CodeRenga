@@ -3,6 +3,8 @@ package runtime
 import (
 	"fmt"
 	"strings"
+
+	"github.com/tks/coderenga/internal/tools"
 )
 
 func (rt *Runtime) systemPrompt() string {
@@ -10,9 +12,17 @@ func (rt *Runtime) systemPrompt() string {
 	b.WriteString(rt.Prompts.Build(rt.Mode))
 	b.WriteString("\n\nRuntime policy:\n- Tool names are fully qualified.\n- Use tools only when the request explicitly requires file access, search, modification, shell, Git, MCP, or plugins. Answer greetings and general conversation directly without tools.\n- Never invent a path; use a user-supplied path or discover it with a read-only tool.\n- If a tool result says dry-run or executed=false, state that it was not executed and never claim a file was created, updated, or written.\n- To call a tool, output exactly one JSON object with keys \"tool\" and \"arguments\" and no prose or Markdown fence.\n- Example: {\"tool\":\"builtin.read_file\",\"arguments\":{\"path\":\"README.md\"}}\n- Policy order is block > confirm > unknown > allow.\nAvailable tools:\n")
 	for _, name := range rt.Registry.Names() {
-		if rt.Registry.Enabled(name) {
-			fmt.Fprintln(&b, "-", name, toolHint(name))
+		tool, ok := rt.Registry.Info(name)
+		if !ok || !rt.Registry.Enabled(name) {
+			continue
 		}
+		if rt.modeDecision(rt.Mode, tool) == tools.Block {
+			continue
+		}
+		if tools.ParseLevel(rt.Config.ToolPolicies[name]) == tools.Block {
+			continue
+		}
+		fmt.Fprintln(&b, "-", name, toolHint(name))
 	}
 	return strings.TrimSpace(b.String())
 }

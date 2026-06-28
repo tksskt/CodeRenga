@@ -96,7 +96,7 @@ Tool Registry は以下の責務を持つ。
 2. User Plugin Tool
 3. MCP Tool
 
-同名衝突が発生した場合は上書きしない。完全修飾名が重複した場合は起動時警告を出し、後から読み込まれたツールを無効化する。
+同名衝突が発生した場合は上書きしない。完全修飾名が重複した場合は起動時警告を出し、後から読み込まれたツールを無効化する。初期ロードでは通常登録 API を使い、同名 Plugin Tool は先に読み込まれたものを維持する。明示的な `/tool reload` だけは reload 用の置換経路を使い、既存の `plugin.*` / `mcp.*` を更新できる。ただし同一 reload バッチ内で同じ完全修飾名が複数見つかった場合は、先に見つかったものを維持し、後続は diagnostics に記録して登録しない。`/tool reload` は Plugin manifest と MCP tool 一覧の両方を再読み込みする。
 
 ### 16.5 名前空間
 
@@ -121,7 +121,7 @@ Plugin Tool は以下の2方式で読み込める。
 ```json
 {
   "version": 1,
-  "policies": {
+  "tool_policy": {
     "plugin.docker_ps": "allow"
   },
   "plugins": {
@@ -229,23 +229,16 @@ Plugin Tool は shell command policy とは別に Tool Policy を持つ。ただ
 ```json
 {
   "tool_policy": {
-    "unknown": "confirm",
-    "allow": [
-      "builtin.read_file",
-      "builtin.write_file",
-      "builtin.apply_patch",
-      "builtin.search_text",
-      "git.status",
-      "git.diff",
-      "plugin.docker_ps"
-    ],
-    "confirm": [
-      "shell.run",
-      "plugin.restart_service"
-    ],
-    "block": [
-      "plugin.wipe_disk"
-    ]
+    "builtin.read_file": "allow",
+    "builtin.write_file": "allow",
+    "builtin.apply_patch": "allow",
+    "builtin.search_text": "allow",
+    "git.status": "allow",
+    "git.diff": "allow",
+    "shell.run": "confirm",
+    "plugin.docker_ps": "allow",
+    "plugin.restart_service": "confirm",
+    "plugin.wipe_disk": "block"
   }
 }
 ```
@@ -253,7 +246,7 @@ Plugin Tool は shell command policy とは別に Tool Policy を持つ。ただ
 評価順は以下とする。
 
 1. mode の allow / deny
-2. tool_policy
+2. tool_policy の完全修飾 tool 名に対応する値
 3. shell_policy。対象が `shell.run` の場合のみ
 4. Tool manifest の policy
 5. unknown fallback
@@ -432,7 +425,7 @@ LLM output
 /tool-policy
 ```
 
-`/tool reload` は Plugin Tool manifest と MCP Tool 一覧を再読み込みする。
+`/tool reload` は Plugin Tool manifest と MCP Tool 一覧を再読み込みする。reload は初期ロードの衝突防止とは別経路で、既存の動的 tool を更新する。Plugin reload では前回の `plugin.*` tool と plugin 診断を一度削除し、今回の manifest から再登録する。MCP reload では既存 MCP client を close し、前回存在したが今回発見されなかった `mcp.*` tool と MCP 診断は Registry から削除する。Built-in / shell / git など静的名前空間の上書きは許可しない。
 
 ### 16.15 初期実装範囲
 
@@ -453,11 +446,3 @@ v0.2 以降で拡張する。
 - args / env input_mode
 - plugin enable / disable 管理
 - plugin package import / export
-
-
-
-
-
-
-
-

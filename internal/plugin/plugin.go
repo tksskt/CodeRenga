@@ -55,6 +55,15 @@ func (t Tool) Policy() tools.Level {
 	}
 	return level
 }
+func (t Tool) AvailableModes() []string {
+	modes := t.Manifest.AvailableModes
+	if modes == nil {
+		return nil
+	}
+	copy_ := make([]string, len(modes))
+	copy(copy_, modes)
+	return copy_
+}
 func (t Tool) Execute(ctx context.Context, r tools.Request) (tools.Result, error) {
 	if t.Manifest.Sandbox.Required && !t.HardSandboxAvailable {
 		return tools.Result{OK: false, Error: "required hard sandbox backend is unavailable"}, nil

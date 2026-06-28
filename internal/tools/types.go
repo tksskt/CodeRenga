@@ -65,6 +65,15 @@ type Tool interface {
 type FileMutator interface {
 	ModifiesFiles() bool
 }
+
+type MalformedToolCallError struct {
+	Reason string
+}
+
+func (e MalformedToolCallError) Error() string {
+	return "invalid tool call: " + e.Reason
+}
+
 type Registry struct {
 	mu       sync.RWMutex
 	items    map[string]Tool
@@ -142,14 +151,17 @@ func ParseCalls(text string) ([]Request, error) {
 		return nil, nil
 	}
 	if strings.Contains(trimmed, "<tool") || strings.Contains(trimmed, "<|tool_call>") {
-		return nil, fmt.Errorf("invalid tool call: legacy tag formats are not supported; output one JSON object with tool and arguments")
+		return nil, MalformedToolCallError{Reason: "legacy tag formats are not supported; output one JSON object with tool and arguments"}
 	}
 	if !strings.HasPrefix(trimmed, "{") {
+		if strings.Contains(trimmed, `"tool"`) && strings.Contains(trimmed, `"arguments"`) {
+			return nil, MalformedToolCallError{Reason: "tool calls must not include prose before or after the JSON object"}
+		}
 		return nil, nil
 	}
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
-		return nil, fmt.Errorf("invalid tool call: expected one JSON object with tool and arguments: %w", err)
+		return nil, MalformedToolCallError{Reason: "expected one JSON object with tool and arguments: " + err.Error()}
 	}
 	if _, ok := envelope["tool"]; !ok {
 		return nil, nil
@@ -158,14 +170,14 @@ func ParseCalls(text string) ([]Request, error) {
 	decoder.DisallowUnknownFields()
 	var req Request
 	if err := decoder.Decode(&req); err != nil {
-		return nil, fmt.Errorf("invalid tool call: expected only tool and arguments fields: %w", err)
+		return nil, MalformedToolCallError{Reason: "expected only tool and arguments fields: " + err.Error()}
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err == nil {
-		return nil, fmt.Errorf("invalid tool call: multiple JSON values are not supported")
+		return nil, MalformedToolCallError{Reason: "multiple JSON values are not supported"}
 	}
 	if !qualified(req.Name) {
-		return nil, fmt.Errorf("invalid tool call: tool name %q is not fully qualified", req.Name)
+		return nil, MalformedToolCallError{Reason: fmt.Sprintf("tool name %q is not fully qualified", req.Name)}
 	}
 	if req.Arguments == nil {
 		req.Arguments = map[string]any{}

@@ -190,7 +190,70 @@ func TestCoderWritePolicyDoesNotAllowShellConfirm(t *testing.T) {
 	}
 }
 
-func newModePolicyRuntime(t *testing.T, root, mode, writeMode, writeToolPolicy string, nonInteractive bool, answers []string) *Runtime {
+func TestToolDenyBlocksWriteFile(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", false, []string{
+		`{"tool":"builtin.write_file","arguments":{"path":"denied.txt","content":"hello"}}`,
+		"blocked by tool_deny",
+	}, "tool_deny: builtin.write_file")
+	defer rt.Close()
+	rt.Approve = func(string, map[string]any) bool {
+		t.Fatal("tool_deny should block without confirmation")
+		return false
+	}
+	if err := rt.RunInstruction(context.Background(), "write denied.txt", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "denied.txt")); !os.IsNotExist(err) {
+		t.Fatalf("write occurred despite tool_deny: %v", err)
+	}
+}
+
+func TestToolAllowBlocksWriteFile(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", false, []string{
+		`{"tool":"builtin.write_file","arguments":{"path":"allowed.txt","content":"hello"}}`,
+		"blocked by tool_allow",
+	}, "tool_allow: builtin.read_file")
+	defer rt.Close()
+	rt.Approve = func(string, map[string]any) bool {
+		t.Fatal("tool_allow should block without confirmation")
+		return false
+	}
+	if err := rt.RunInstruction(context.Background(), "write allowed.txt", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "allowed.txt")); !os.IsNotExist(err) {
+		t.Fatalf("write occurred despite tool_allow restriction: %v", err)
+	}
+}
+
+func TestSystemPromptOmitsModeDeniedTools(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", false, []string{}, "tool_deny: builtin.write_file")
+	defer rt.Close()
+	prompt := rt.systemPrompt()
+	if strings.Contains(prompt, "builtin.write_file") {
+		t.Fatalf("denied tool was exposed in system prompt: %s", prompt)
+	}
+	if !strings.Contains(prompt, "builtin.read_file") {
+		t.Fatalf("read tool missing from system prompt: %s", prompt)
+	}
+}
+
+func TestSystemPromptOmitsToolPolicyBlockedTools(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "block", false, []string{})
+	defer rt.Close()
+	prompt := rt.systemPrompt()
+	if strings.Contains(prompt, "builtin.write_file") {
+		t.Fatalf("tool_policy block tool was exposed in system prompt: %s", prompt)
+	}
+	if !strings.Contains(prompt, "builtin.read_file") {
+		t.Fatalf("read tool missing from system prompt: %s", prompt)
+	}
+}
+func newModePolicyRuntime(t *testing.T, root, mode, writeMode, writeToolPolicy string, nonInteractive bool, answers []string, extraFrontmatter ...string) *Runtime {
 	t.Helper()
 	var mu sync.Mutex
 	requestCount := 0
@@ -219,13 +282,20 @@ func newModePolicyRuntime(t *testing.T, root, mode, writeMode, writeToolPolicy s
 	if writeToolPolicy != "" {
 		toolsJSON = fmt.Sprintf(`{"version":1,"policies":{"builtin.write_file":%q,"builtin.apply_patch":%q,"shell.run":"confirm"},"plugins":{}}`, writeToolPolicy, writeToolPolicy)
 	}
+
+	extraLines := strings.Join(extraFrontmatter, "\n")
+	if extraLines != "" {
+		extraLines = "\n" + extraLines
+	}
+	modeContent := fmt.Sprintf("---\nname: %s\nwrite: %s\nshell: policy\nmcp: true%s\n---\nmode", mode, writeMode, extraLines)
+
 	files := map[string]string{
 		"config.json":           `{"version":1,"defaultMode":"` + mode + `","defaultProfile":"test","state":{"database":"coderenga.db"}}`,
 		"llm.json":              fmt.Sprintf(`{"version":1,"profiles":{"test":{"baseURL":%q,"model":"m"}}}`, server.URL),
 		"tools.json":            toolsJSON,
 		"prompts/default.md":    "system",
 		"prompts/compact.md":    "compact",
-		"modes/" + mode + ".md": fmt.Sprintf("---\nname: %s\nwrite: %s\nshell: policy\nmcp: true\n---\nmode", mode, writeMode),
+		"modes/" + mode + ".md": modeContent,
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {

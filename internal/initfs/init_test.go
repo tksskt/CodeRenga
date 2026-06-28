@@ -16,7 +16,7 @@ func TestInitializeCreatesEmbeddedTemplatesAndDatabase(t *testing.T) {
 	if err := Initialize(root, templatefs.Files); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"config.json", "llm.json", "mcp.json", "tools.json", "prompts/default.md", "prompts/compact.md", "modes/coder.md", "modes/architect.md", "modes/debug.md", "modes/reviewer.md", "coderenga.db"} {
+	for _, name := range []string{"config.json", "llm.json", "mcp.json", "tools.json", "prompts/default.md", "prompts/compact.md", "modes/coder.md", "modes/architect.md", "modes/debug.md", "modes/reviewer.md", "modes/documenter.md", "coderenga.db"} {
 		if _, err := os.Stat(filepath.Join(root, "coderenga.d", filepath.FromSlash(name))); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

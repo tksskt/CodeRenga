@@ -35,12 +35,16 @@ func Open(path string, noPersist bool) (*Store, error) {
 }
 func (s *Store) Close() error { return s.DB.Close() }
 func (s *Store) CreateSession(ctx context.Context, id, project, mode, profile string) error {
+	return s.CreateSessionWithFingerprints(ctx, id, project, mode, profile, "", "")
+}
+
+func (s *Store) CreateSessionWithFingerprints(ctx context.Context, id, project, mode, profile, configFingerprint, promptFingerprint string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, e := s.DB.ExecContext(ctx, `INSERT INTO sessions(id,project_path,project_hash,title,active_mode,active_profile,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, project, project, "", mode, profile, "active", now, now)
+	_, e := s.DB.ExecContext(ctx, `INSERT INTO sessions(id,project_path,project_hash,title,active_mode,active_profile,status,config_fingerprint,prompt_fingerprint,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, project, project, "", mode, profile, "active", configFingerprint, promptFingerprint, now, now)
 	return e
 }
 
-type Session struct{ ID, ProjectPath, Title, Mode, Profile, Status, CreatedAt, UpdatedAt string }
+type Session struct{ ID, ProjectPath, Title, Mode, Profile, Status, ConfigFingerprint, PromptFingerprint, CreatedAt, UpdatedAt string }
 
 func (s *Store) Sessions(ctx context.Context, query string) ([]Session, error) {
 	q := `SELECT id,project_path,COALESCE(title,''),COALESCE(active_mode,''),COALESCE(active_profile,''),status,created_at,updated_at FROM sessions`
@@ -66,7 +70,7 @@ func (s *Store) Sessions(ctx context.Context, query string) ([]Session, error) {
 	return out, rows.Err()
 }
 func (s *Store) AddMessage(ctx context.Context, sid, role, content string) (int64, error) {
-	r, e := s.DB.ExecContext(ctx, `INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)`, sid, role, content, time.Now().UTC().Format(time.RFC3339Nano))
+	r, e := s.DB.ExecContext(ctx, `INSERT INTO messages(session_id,role,content,token_estimate,created_at) VALUES(?,?,?,?,?)`, sid, role, content, EstimateTokens(content), time.Now().UTC().Format(time.RFC3339Nano))
 	if e != nil {
 		return 0, e
 	}
@@ -125,6 +129,13 @@ func boolInt(v bool) int {
 	}
 	return 0
 }
+func EstimateTokens(content string) int {
+	if content == "" {
+		return 0
+	}
+	return (len(content) + 3) / 4
+}
+
 func clip(s string) string {
 	if len(s) > 512 {
 		return s[:512]

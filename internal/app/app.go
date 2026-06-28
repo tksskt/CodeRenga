@@ -59,6 +59,14 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, a Options) in
 		}
 	}
 	instruction := o.Instruction
+	if o.InstructionFile != "" {
+		b, readErr := os.ReadFile(o.InstructionFile)
+		if readErr != nil {
+			fmt.Fprintln(stderr, "coderenga: instruction-file:", readErr)
+			return 1
+		}
+		instruction = strings.TrimSpace(instruction + "\n" + string(b))
+	}
 	if o.ReadStdin {
 		b, readErr := io.ReadAll(io.LimitReader(stdin, 8<<20))
 		if readErr != nil {
@@ -67,7 +75,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, a Options) in
 		}
 		instruction = strings.TrimSpace(instruction + "\n" + string(b))
 	}
-	rt, err := coderengaruntime.New(context.Background(), coderengaruntime.Options{BinaryDir: bin, CWD: cwd, ConfigPath: o.ConfigPath, StateDir: o.StateDir, Mode: o.Mode, Profile: o.Profile, Model: o.Model, NoPersist: o.NoPersist, DryRun: o.DryRun, NonInteractive: o.NonInteractive})
+	rt, err := coderengaruntime.New(context.Background(), coderengaruntime.Options{BinaryDir: bin, CWD: cwd, ConfigPath: o.ConfigPath, StateDir: o.StateDir, Mode: o.Mode, Profile: o.Profile, Model: o.Model, NoPersist: o.NoPersist, DryRun: o.DryRun, NonInteractive: o.NonInteractive, MaxTurns: o.MaxTurns})
 	if err != nil {
 		printStartupError(stderr, err)
 		return 1

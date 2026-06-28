@@ -89,7 +89,7 @@ internal/
 
 デフォルトではバイナリ横の `coderenga.d/config.json` を起点とし、同じディレクトリの分割設定を読み込む。HOME / XDG 配下は自動探索しない。
 
-1. `config.json`: default mode/profile、state database
+1. `config.json`: default mode/profile、state database、compact runtime settings
 2. `llm.json`: LLM profileと接続設定
 3. `mcp.json`: MCP server定義
 4. `tools.json`: Tool policy、shell policy、plugin定義
@@ -102,8 +102,10 @@ internal/
 `config.json`:
 
 ```json
-{"version":1,"defaultMode":"coder","defaultProfile":"local","state":{"database":"coderenga.db"}}
+{"version":1,"defaultMode":"coder","defaultProfile":"local","state":{"database":"coderenga.db"},"compact":{"level":"normal","context_tokens":4096,"trigger_context_ratio":0.75,"trigger_turns":30}}
 ```
+
+`compact.level` は `light` / `normal` / `hard` の固定3段階のみを受け付ける。`compact.levels` はこの3段階それぞれの `target_tokens` を上書きするための任意設定で、custom level 名はサポートしない。
 
 `llm.json`:
 
@@ -120,7 +122,7 @@ internal/
 `tools.json`:
 
 ```json
-{"version":1,"policies":{"builtin.read_file":"allow","builtin.write_file":"allow","builtin.apply_patch":"allow","shell.run":"confirm","git.status":"allow","git.diff":"allow"},"plugins":{}}
+{"version":1,"tool_policy":{"builtin.read_file":"allow","builtin.write_file":"allow","builtin.apply_patch":"allow","shell.run":"confirm","git.status":"allow","git.diff":"allow"},"shell_policy":{"unknown":"confirm"},"plugins":{}}
 ```
 
 ## 3. プロンプト設計
@@ -356,7 +358,7 @@ Shell Policy は生文字列の glob 一致で判定してはならない。`git
 3. 各セグメントを argv 化し、コメント、引用、エスケープを正規化する。
 4. 各セグメントごとに `block -> confirm -> allow -> unknown` の順で評価する。
 5. 全体の判定は最も危険な結果を採用する。優先度は `block > confirm > unknown > allow` とする。
-6. unknown は設定の `shell_policy.unknown` に従う。既定値は `confirm` とする。
+6. unknown は設定の `shell_policy.unknown` に従う。既定値は `confirm` とする。`shell_policy` は部分指定を許可し、`unknown` を省略して `block` / `allow` / `confirm` だけを指定した場合も既定値とマージして読み込む。
 
 複合コマンド内に 1 つでも confirm / unknown / block が含まれる場合、全体を allow にしてはならない。
 
@@ -504,12 +506,3 @@ MCP tool も通常 tool と同様に承認ポリシーを適用できる。
 /summary show              active summary 表示
 /db status                 DB状態表示
 ```
-
-
-
-
-
-
-
-
-

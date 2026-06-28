@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/tks/coderenga/internal/config"
 	"github.com/tks/coderenga/internal/llm"
@@ -25,22 +27,28 @@ import (
 type Options struct {
 	BinaryDir, CWD, ConfigPath, StateDir, Mode, Profile, Model string
 	NoPersist, DryRun, NonInteractive                          bool
+	MaxTurns                                                   int
 }
 type Runtime struct {
-	Config                                          config.Config
-	Prompts                                         *prompt.Manager
-	Store                                           *storage.Store
-	Registry                                        *tools.Registry
-	Executor                                        *tools.Executor
-	LLM                                             *llm.Client
-	CWD, BinaryDir, Mode, Profile, Model, SessionID string
-	DryRun                                          bool
-	MCP                                             map[string]mcp.Client
-	Approve                                         tools.Approver
+	Config                                                      config.Config
+	Prompts                                                     *prompt.Manager
+	Store                                                       *storage.Store
+	Registry                                                    *tools.Registry
+	Executor                                                    *tools.Executor
+	LLM                                                         *llm.Client
+	CWD, BinaryDir, ConfigPath, Mode, Profile, Model, SessionID string
+	DryRun                                                      bool
+	MCP                                                         map[string]mcp.Client
+	Approve                                                     tools.Approver
+	Transcript                                                  []TranscriptEntry
+	ToolCalls                                                   []ToolCallRecord
+	Diagnostics                                                 []string
+	ToolDiagnostics                                             map[string]string
+	MaxTurns                                                    int
 }
 
 func New(ctx context.Context, o Options) (*Runtime, error) {
-	cfg, _, e := config.Load(o.BinaryDir, o.CWD, o.ConfigPath)
+	cfg, configFiles, e := config.Load(o.BinaryDir, o.CWD, o.ConfigPath)
 	if e != nil {
 		return nil, e
 	}
@@ -74,7 +82,7 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	if e != nil {
 		return nil, e
 	}
-	rt := &Runtime{Config: cfg, Prompts: pm, Store: store, Registry: tools.NewRegistry(), LLM: llm.New(), CWD: o.CWD, BinaryDir: o.BinaryDir, Mode: mode, Profile: profile, Model: model, SessionID: fmt.Sprintf("%d", time.Now().UnixNano()), DryRun: o.DryRun, MCP: map[string]mcp.Client{}}
+	rt := &Runtime{Config: cfg, Prompts: pm, Store: store, Registry: tools.NewRegistry(), LLM: llm.New(), CWD: o.CWD, BinaryDir: o.BinaryDir, ConfigPath: o.ConfigPath, Mode: mode, Profile: profile, Model: model, SessionID: fmt.Sprintf("%d", time.Now().UnixNano()), DryRun: o.DryRun, MCP: map[string]mcp.Client{}, ToolDiagnostics: map[string]string{}, MaxTurns: o.MaxTurns}
 	initialized := false
 	defer func() {
 		if !initialized {
@@ -90,8 +98,8 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	if e = rt.Registry.Register(&shelltool.Runner{PolicyConfig: cfg.ShellPolicy, Store: store}); e != nil {
 		return nil, e
 	}
-	rt.loadPlugins()
-	rt.loadMCP(ctx)
+	rt.loadPlugins(false)
+	rt.loadMCP(ctx, false)
 	rt.Executor = &tools.Executor{Registry: rt.Registry, Store: store, NonInteractive: o.NonInteractive, PolicyDecision: func(name string) tools.Level {
 		value, configured := cfg.ToolPolicies[name]
 		if !configured {
@@ -104,7 +112,9 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 		}
 		return rt.Approve(n, a)
 	}, ModeDecision: rt.modeDecision}
-	if e = store.CreateSession(ctx, rt.SessionID, o.CWD, mode, profile); e != nil {
+	configFingerprint := fingerprintConfigFiles(configFiles)
+	promptFingerprint := fingerprintFiles(pm.Files())
+	if e = store.CreateSessionWithFingerprints(ctx, rt.SessionID, o.CWD, mode, profile, configFingerprint, promptFingerprint); e != nil {
 		return nil, e
 	}
 	initialized = true
@@ -127,6 +137,19 @@ func (rt *Runtime) modeDecision(mode string, tool tools.Tool) tools.Level {
 	if err != nil {
 		return tools.Unknown
 	}
+	name := tool.Name()
+	if matchesAnyToolPattern(name, m.ToolDeny) {
+		return tools.Block
+	}
+	if len(m.ToolAllow) > 0 && !matchesAnyToolPattern(name, m.ToolAllow) {
+		return tools.Block
+	}
+	if am, ok := tool.(interface{ AvailableModes() []string }); ok {
+		modes := am.AvailableModes()
+		if len(modes) > 0 && !modeInList(mode, modes) {
+			return tools.Block
+		}
+	}
 	if mutator, ok := tool.(tools.FileMutator); ok && mutator.ModifiesFiles() {
 		switch strings.ToLower(strings.TrimSpace(m.Write)) {
 		case "allow", "true":
@@ -139,7 +162,6 @@ func (rt *Runtime) modeDecision(mode string, tool tools.Tool) tools.Level {
 			return tools.Unknown
 		}
 	}
-	name := tool.Name()
 	if name == "shell.run" && m.Shell == "allow_readonly" {
 		return tools.Confirm
 	}
@@ -148,18 +170,81 @@ func (rt *Runtime) modeDecision(mode string, tool tools.Tool) tools.Level {
 	}
 	return tools.Allow
 }
-func (rt *Runtime) loadPlugins() {
+func matchesAnyToolPattern(name string, patterns []string) bool {
+	for _, p := range patterns {
+		if matchesToolPattern(name, p) {
+			return true
+		}
+	}
+	return false
+}
+func matchesToolPattern(name, pattern string) bool {
+	if name == pattern {
+		return true
+	}
+	if strings.HasSuffix(pattern, ".*") {
+		prefix := pattern[:len(pattern)-2]
+		return strings.HasPrefix(name, prefix+".") || name == prefix
+	}
+	return false
+}
+func modeInList(mode string, modes []string) bool {
+	for _, m := range modes {
+		if m == mode {
+			return true
+		}
+	}
+	return false
+}
+func (rt *Runtime) recordToolDiagnostic(name, reason string) {
+	if rt.ToolDiagnostics == nil {
+		rt.ToolDiagnostics = map[string]string{}
+	}
+	rt.ToolDiagnostics[name] = reason
+	rt.Diagnostics = append(rt.Diagnostics, name+": "+reason)
+}
+func (rt *Runtime) loadPlugins(reload bool) {
+	if reload {
+		for _, name := range rt.Registry.RemovePrefix("plugin.") {
+			delete(rt.ToolDiagnostics, name)
+		}
+	}
 	items, _ := plugin.LoadToolsJSON(filepath.Join(rt.BinaryDir, "coderenga.d", "tools.json"))
 	more, _ := plugin.LoadDirectory(filepath.Join(rt.BinaryDir, "coderenga.d", "plugins"))
 	items = append(items, more...)
+	seen := map[string]bool{}
 	for _, t := range items {
-		_ = rt.Registry.Replace(t)
+		name := t.Name()
+		if seen[name] {
+			rt.recordToolDiagnostic(name, "tool registration skipped: duplicate tool in reload batch")
+			continue
+		}
+		seen[name] = true
+		if reload {
+			if err := rt.Registry.Replace(t); err != nil {
+				rt.recordToolDiagnostic(name, "tool reload skipped: "+err.Error())
+			}
+			continue
+		}
+		if err := rt.Registry.RegisterDynamic(t); err != nil {
+			rt.recordToolDiagnostic(name, "tool registration skipped: "+err.Error())
+		}
 	}
 }
-func (rt *Runtime) loadMCP(ctx context.Context) {
+func (rt *Runtime) loadMCP(ctx context.Context, reload bool) {
 	if !rt.Config.MCP.Enabled {
 		return
 	}
+	if reload {
+		for name, client := range rt.MCP {
+			_ = client.Close()
+			delete(rt.MCP, name)
+		}
+		for _, name := range rt.Registry.RemovePrefix("mcp.") {
+			delete(rt.ToolDiagnostics, name)
+		}
+	}
+	seen := map[string]bool{}
 	for name, cfg := range rt.Config.MCP.Servers {
 		if !cfg.Enabled {
 			continue
@@ -178,19 +263,37 @@ func (rt *Runtime) loadMCP(ctx context.Context) {
 			continue
 		}
 		for _, info := range infos {
-			_ = rt.registerMCPTool(ctx, name, info, c)
+			toolName := mcp.Bridge{Server: name, Info: info, Client: c}.Name()
+			if seen[toolName] {
+				rt.recordToolDiagnostic(toolName, "mcp tool registration skipped: duplicate tool in reload batch")
+				continue
+			}
+			seen[toolName] = true
+			if err := rt.registerMCPTool(ctx, name, info, c, reload); err != nil {
+				rt.recordToolDiagnostic(toolName, "mcp tool registration skipped: "+err.Error())
+			}
 		}
 	}
 }
-func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out io.Writer) error {
-	if _, err := rt.addMessage(ctx, "user", instruction); err != nil {
+func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out io.Writer) (err error) {
+	defer func() {
+		if err == nil {
+			_ = rt.maybeAutoCompact(ctx)
+		}
+	}()
+	if _, err := rt.addMessageNoCompact(ctx, "user", instruction); err != nil {
 		return err
 	}
 	lastSignature := ""
 	lastResults := map[string]string{}
 	var callHistory []string
 	var dryRunSkipped []tools.Request
-	for turn := 0; turn < 8; turn++ {
+	malformedRepairUsed := false
+	taskStartRepairUsed := false
+	loopRepairUsed := false
+	maxTurns := rt.maxTurns()
+turnLoop:
+	for turn := 0; turn < maxTurns; turn++ {
 		msgs, err := rt.context(ctx)
 		if err != nil {
 			return err
@@ -204,8 +307,26 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 		if err != nil {
 			return err
 		}
+		rt.recordTranscript(turn, "llm_output", "", "", answer, "", "")
 		calls, err := tools.ParseCalls(answer)
 		if err != nil {
+			var malformed tools.MalformedToolCallError
+			if errors.As(err, &malformed) {
+				if malformedRepairUsed {
+					rt.recordTranscript(turn, "parse_error", "", "", answer, "malformed_tool_call_after_repair", "")
+					return fmt.Errorf("malformed tool call after repair: %w", err)
+				}
+				rt.recordTranscript(turn, "parse_error", "", "", answer, "malformed_tool_call", "")
+				malformedRepairUsed = true
+				if _, err = rt.addMessage(ctx, "assistant", answer); err != nil {
+					return err
+				}
+				if _, err = rt.addMessage(ctx, "user", toolCallRepairMessage(malformed, answer)); err != nil {
+					return err
+				}
+				rt.recordTranscript(turn, "recovery", "", "", malformed.Reason, "malformed_tool_call", "")
+				continue
+			}
 			return err
 		}
 		if len(calls) > 0 && isSimpleConversation(instruction) {
@@ -217,6 +338,21 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 			return nil
 		}
 		if len(calls) == 0 {
+			if shouldRecoverTaskStart(instruction, answer) {
+				if taskStartRepairUsed {
+					rt.recordTranscript(turn, "recovery_failed", "", "", answer, "task_start_stall", "")
+					return fmt.Errorf("task-start recovery failed: model did not start the concrete task after recovery; last answer: %s", limitText(answer, 512))
+				}
+				rt.recordTranscript(turn, "recovery", "", "", answer, "task_start_stall", "")
+				taskStartRepairUsed = true
+				if _, err = rt.addMessage(ctx, "assistant", answer); err != nil {
+					return err
+				}
+				if _, err = rt.addMessage(ctx, "user", taskStartRepairMessage(instruction, answer)); err != nil {
+					return err
+				}
+				continue
+			}
 			final := answer
 			if len(dryRunSkipped) > 0 {
 				final = dryRunFinal(dryRunSkipped)
@@ -233,16 +369,37 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 		for _, call := range calls {
 			signature := toolCallSignature(call)
 			if signature == lastSignature {
-				return fmt.Errorf("repeated tool call detected: %s was requested again immediately after its result; previous result: %s", toolCallSummary(call), lastResults[signature])
+				if loopRepairUsed {
+					rt.recordTranscript(turn, "loop_error", call.Name, signature, lastResults[signature], "repeated_tool_call", "")
+					return fmt.Errorf("repeated tool call detected after recovery: %s was requested again immediately after its result; previous result: %s", toolCallSummary(call), lastResults[signature])
+				}
+				loopRepairUsed = true
+				if _, err = rt.addMessage(ctx, "user", repeatedToolCallRecoveryMessage(call, lastResults[signature])); err != nil {
+					return err
+				}
+				rt.recordTranscript(turn, "recovery", call.Name, signature, lastResults[signature], "repeated_tool_call", "")
+				continue turnLoop
 			}
 			lastSignature = signature
 			callHistory = append(callHistory, toolCallSummary(call))
+			rt.recordToolStatus(call.Name, ToolCallGenerated)
+			rt.recordTranscript(turn, "tool_call", call.Name, signature, "", "", "")
 			call.Context = tools.Context{CWD: rt.CWD, Mode: rt.Mode, SessionID: rt.SessionID, DryRun: rt.DryRun}
+			rt.recordToolStatus(call.Name, ToolCallRunning)
 			res, err := rt.Executor.Execute(ctx, call)
 			if err != nil {
 				return err
 			}
 			lastResults[signature] = toolResultSummary(res)
+			status := ToolCallDone
+			if !res.OK {
+				status = ToolCallFailed
+				if strings.Contains(res.Error, "blocked by policy") {
+					status = ToolCallBlocked
+				}
+			}
+			rt.recordToolStatus(call.Name, status)
+			rt.recordTranscript(turn, "tool_result", call.Name, signature, toolResultSummary(res), res.Error, "")
 			body, _ := json.Marshal(res)
 			toolResult := fmt.Sprintf("Tool result for %s:\n%s", call.Name, body)
 			if _, err = rt.addMessage(ctx, "user", toolResult); err != nil {
@@ -255,7 +412,14 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 			}
 		}
 	}
-	return fmt.Errorf("tool loop exceeded 8 turns; calls: %s", strings.Join(callHistory, " -> "))
+	return fmt.Errorf("tool loop exceeded %d turns; calls: %s", maxTurns, strings.Join(callHistory, " -> "))
+}
+
+func (rt *Runtime) maxTurns() int {
+	if rt.MaxTurns > 0 {
+		return rt.MaxTurns
+	}
+	return 8
 }
 
 func printToolArguments(out io.Writer, arguments map[string]any) {
@@ -310,6 +474,55 @@ func limitText(value string, limit int) string {
 		return value[:limit] + "..."
 	}
 	return value
+}
+
+func toolCallRepairMessage(err tools.MalformedToolCallError, answer string) string {
+	return fmt.Sprintf("The previous assistant message was intended to call a tool, but CodeRenga could not parse it. Reason: %s. Previous output: %s\n\nReturn exactly one JSON object with only the keys \"tool\" and \"arguments\", or answer in plain text if no tool is needed. Do not use XML tags, Markdown fences, or prose around a tool call. Example: {\"tool\":\"builtin.read_file\",\"arguments\":{\"path\":\"README.md\"}}", err.Reason, limitText(answer, 512))
+}
+
+func repeatedToolCallRecoveryMessage(call tools.Request, previous string) string {
+	return fmt.Sprintf("The previous tool call was already executed and returned this result: %s. Do not repeat the same tool call. Continue with a different tool, an edit tool, or a concrete final answer. Repeated call: %s", limitText(previous, 512), toolCallSummary(call))
+}
+
+func taskStartRepairMessage(instruction, answer string) string {
+	return fmt.Sprintf("The user gave a concrete repository task, but the previous answer did not start it. User instruction: %s. Previous answer: %s\n\nStart the task now. If repository context is needed, return exactly one JSON tool call using builtin.read_file, builtin.list_files, or builtin.search_text. If no tool is needed, provide a concrete final answer. Do not ask what to do next.", limitText(instruction, 512), limitText(answer, 512))
+}
+
+func shouldRecoverTaskStart(instruction, answer string) bool {
+	if isSimpleConversation(instruction) || !looksLikeConcreteTask(instruction) {
+		return false
+	}
+	return looksLikeTaskStartStall(answer)
+}
+
+func looksLikeConcreteTask(value string) bool {
+	v := strings.ToLower(value)
+	markers := []string{
+		"implement", "fix", "edit", "update", "modify", "add test", "add tests", "review", "readme", "design doc", "document",
+		"実装", "修正", "更新", "変更", "追加", "レビュー", "設計書", "テスト", "ドキュメント",
+	}
+	for _, marker := range markers {
+		if strings.Contains(v, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeTaskStartStall(answer string) bool {
+	v := strings.ToLower(strings.TrimSpace(answer))
+	if v == "" {
+		return false
+	}
+	markers := []string{
+		"hello", "hi", "how can i help", "what would you like", "what do you want", "please provide", "please tell me", "could you provide", "どのような", "何を", "教えてください", "お手伝い", "こんにちは",
+	}
+	for _, marker := range markers {
+		if strings.Contains(v, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
 }
 
 func dryRunFinal(calls []tools.Request) string {
@@ -377,6 +590,9 @@ func (rt *Runtime) Handle(ctx context.Context, line string, out io.Writer) (bool
 		fmt.Fprintln(out, "/mode /modes /profile /model /status /prompts /reload-prompts /db status /session list|resume|search /compact light|normal|hard /mcp list|tools /tools /tool info|enable|disable|reload /tool-policy /exit")
 	case "/status":
 		fmt.Fprintf(out, "cwd: %s\nmode: %s\nprofile: %s\nmodel: %s\nsession: %s\n", rt.CWD, rt.Mode, rt.Profile, rt.Model, rt.SessionID)
+		for _, diagnostic := range rt.Diagnostics {
+			fmt.Fprintln(out, "diagnostic:", diagnostic)
+		}
 	case "/modes":
 		for _, m := range rt.Prompts.Modes() {
 			fmt.Fprintf(out, "%s\t%s\n", m.Name, m.Description)
@@ -448,7 +664,7 @@ func (rt *Runtime) Handle(ctx context.Context, line string, out io.Writer) (bool
 		}
 		rt.printTools(out, prefix)
 	case "/tool":
-		return false, rt.toolCommand(p, out)
+		return false, rt.toolCommand(ctx, p, out)
 	case "/tool-policy":
 		fmt.Fprintln(out, "block > confirm > unknown > allow")
 	default:
@@ -457,19 +673,41 @@ func (rt *Runtime) Handle(ctx context.Context, line string, out io.Writer) (bool
 	return false, nil
 }
 func (rt *Runtime) printTools(out io.Writer, prefix string) {
+	printed := map[string]bool{}
 	for _, n := range rt.Registry.Names() {
 		if prefix == "" || strings.HasPrefix(n, prefix) {
-			fmt.Fprintf(out, "%s\tenabled=%t\n", n, rt.Registry.Enabled(n))
+			printed[n] = true
+			if reason := rt.ToolDiagnostics[n]; reason != "" {
+				fmt.Fprintf(out, "%s	enabled=%t	reason=%s\n", n, rt.Registry.Enabled(n), reason)
+			} else {
+				fmt.Fprintf(out, "%s	enabled=%t\n", n, rt.Registry.Enabled(n))
+			}
 		}
 	}
+	for _, n := range sortedDiagnosticNames(rt.ToolDiagnostics) {
+		if printed[n] || (prefix != "" && !strings.HasPrefix(n, prefix)) {
+			continue
+		}
+		fmt.Fprintf(out, "%s	enabled=false	reason=%s\n", n, rt.ToolDiagnostics[n])
+	}
 }
-func (rt *Runtime) toolCommand(p []string, out io.Writer) error {
+
+func sortedDiagnosticNames(values map[string]string) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+func (rt *Runtime) toolCommand(ctx context.Context, p []string, out io.Writer) error {
 	if len(p) < 2 {
 		return fmt.Errorf("usage: /tool info|enable|disable|reload")
 	}
 	if p[1] == "reload" {
-		rt.loadPlugins()
-		fmt.Fprintln(out, "plugins reloaded")
+		rt.loadPlugins(true)
+		rt.loadMCP(ctx, true)
+		fmt.Fprintln(out, "tools reloaded")
 		return nil
 	}
 	if len(p) < 3 {
@@ -482,6 +720,9 @@ func (rt *Runtime) toolCommand(p []string, out io.Writer) error {
 			return fmt.Errorf("unknown tool")
 		}
 		fmt.Fprintf(out, "%s\nenabled: %t\npolicy: %s\n%s\n", t.Name(), rt.Registry.Enabled(p[2]), t.Policy(), t.Description())
+		if reason := rt.ToolDiagnostics[p[2]]; reason != "" {
+			fmt.Fprintln(out, "reason:", reason)
+		}
 	case "enable":
 		return rt.Registry.SetEnabled(p[2], true)
 	case "disable":
@@ -506,6 +747,13 @@ func (rt *Runtime) sessionCommand(ctx context.Context, p []string, out io.Writer
 		if v, ok := rt.Config.Profiles[s.Profile]; ok {
 			rt.Model = v.Model
 		}
+		currentConfig, currentPrompt := rt.currentFingerprints()
+		if s.ConfigFingerprint != "" && s.ConfigFingerprint != currentConfig {
+			fmt.Fprintln(out, "warning: configuration fingerprint differs from the resumed session")
+		}
+		if s.PromptFingerprint != "" && s.PromptFingerprint != currentPrompt {
+			fmt.Fprintln(out, "warning: prompt fingerprint differs from the resumed session")
+		}
 		fmt.Fprintln(out, "resumed", s.ID)
 		return nil
 	}
@@ -522,6 +770,82 @@ func (rt *Runtime) sessionCommand(ctx context.Context, p []string, out io.Writer
 	}
 	return nil
 }
+func (rt *Runtime) currentFingerprints() (string, string) {
+	_, configFiles, _ := config.Load(rt.BinaryDir, rt.CWD, rt.ConfigPath)
+	return fingerprintConfigFiles(configFiles), fingerprintFiles(rt.Prompts.Files())
+}
+
+func fingerprintFiles(files []string) string {
+	return fingerprintFilesWithSanitizer(files, nil)
+}
+
+func fingerprintConfigFiles(files []string) string {
+	return fingerprintFilesWithSanitizer(files, sanitizeFingerprintJSON)
+}
+
+func fingerprintFilesWithSanitizer(files []string, sanitize func([]byte) []byte) string {
+	h := sha256.New()
+	for _, file := range files {
+		if file == "" {
+			continue
+		}
+		h.Write([]byte(file))
+		if b, err := os.ReadFile(file); err == nil {
+			if sanitize != nil {
+				b = sanitize(b)
+			}
+			h.Write(b)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func sanitizeFingerprintJSON(input []byte) []byte {
+	var value any
+	if err := json.Unmarshal(input, &value); err != nil {
+		return input
+	}
+	value = sanitizeFingerprintValue(value)
+	b, err := json.Marshal(value)
+	if err != nil {
+		return input
+	}
+	return b
+}
+
+func sanitizeFingerprintValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, child := range v {
+			if secretFingerprintKey(key) {
+				out[key] = "<present>"
+				continue
+			}
+			out[key] = sanitizeFingerprintValue(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = sanitizeFingerprintValue(child)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func secretFingerprintKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", ""))
+	switch normalized {
+	case "apikey", "token", "secret", "password", "credential", "credentials", "clientsecret":
+		return true
+	default:
+		return false
+	}
+}
+
 func (rt *Runtime) compact(ctx context.Context, level string, out io.Writer) error {
 	if level != "light" && level != "normal" && level != "hard" {
 		return fmt.Errorf("invalid compact level")
@@ -547,7 +871,11 @@ func (rt *Runtime) compact(ctx context.Context, level string, out io.Writer) err
 	if e != nil {
 		return e
 	}
-	summary, e := rt.LLM.Chat(ctx, profile, []llm.Message{{Role: "system", Content: string(promptText)}, {Role: "user", Content: b.String()}}, false, nil)
+	systemPrompt := string(promptText)
+	if target := rt.compactTargetTokens(level); target > 0 {
+		systemPrompt += fmt.Sprintf("\n\nTarget summary length: about %d tokens.", target)
+	}
+	summary, e := rt.LLM.Chat(ctx, profile, []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: b.String()}}, false, nil)
 	if e != nil {
 		return e
 	}
@@ -556,4 +884,11 @@ func (rt *Runtime) compact(ctx context.Context, level string, out io.Writer) err
 	}
 	fmt.Fprintln(out, "conversation compacted:", level)
 	return nil
+}
+
+func (rt *Runtime) compactTargetTokens(level string) int {
+	if rt.Config.Compact.Levels == nil {
+		return 0
+	}
+	return rt.Config.Compact.Levels[level].TargetTokens
 }

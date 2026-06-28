@@ -31,6 +31,18 @@ func TestToolLoopReadsFileAndReturnsFinalAnswer(t *testing.T) {
 	if out.String() != "README summary\n" {
 		t.Fatalf("output=%q", out.String())
 	}
+	foundToolResult := false
+	for _, entry := range rt.Transcript {
+		if entry.Kind == "tool_result" && entry.Tool == "builtin.read_file" {
+			foundToolResult = true
+		}
+	}
+	if !foundToolResult {
+		t.Fatalf("transcript=%#v", rt.Transcript)
+	}
+	if len(rt.ToolCalls) == 0 || rt.ToolCalls[len(rt.ToolCalls)-1].Status != ToolCallDone {
+		t.Fatalf("tool calls=%#v", rt.ToolCalls)
+	}
 	if len(*requests) != 2 || !strings.Contains((*requests)[1], "CodeRenga test README") {
 		t.Fatalf("requests=%v", *requests)
 	}
@@ -105,13 +117,113 @@ func TestSimpleGreetingDoesNotExecuteUnexpectedToolCall(t *testing.T) {
 	}
 }
 
+func TestMalformedToolCallGetsOneRepairTurn(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("repair README"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rt, requests := newToolLoopRuntime(t, root, []string{
+		`<tool>{"tool":"builtin.read_file","arguments":{"path":"README.md"}}</tool>`,
+		`{"tool":"builtin.read_file","arguments":{"path":"README.md"}}`,
+		"repaired summary",
+	})
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "read README", &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "repaired summary\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(*requests) != 3 {
+		t.Fatalf("requests=%d", len(*requests))
+	}
+	if !strings.Contains((*requests)[1], "legacy tag formats") || !strings.Contains((*requests)[1], "exactly one JSON object") {
+		t.Fatalf("repair prompt was not sent: %s", (*requests)[1])
+	}
+	if !strings.Contains((*requests)[2], "repair README") {
+		t.Fatalf("tool result was not returned after repair: %s", (*requests)[2])
+	}
+}
+
+func TestMalformedToolCallRepairFailureReturnsError(t *testing.T) {
+	root := t.TempDir()
+	rt, _ := newToolLoopRuntime(t, root, []string{
+		`<tool>{"tool":"builtin.read_file","arguments":{"path":"README.md"}}</tool>`,
+		`I will read it now. {"tool":"builtin.read_file","arguments":{"path":"README.md"}}`,
+	})
+	defer rt.Close()
+	err := rt.RunInstruction(context.Background(), "read README", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "malformed tool call after repair") || !strings.Contains(err.Error(), "tool calls must not include prose") {
+		t.Fatalf("err=%v", err)
+	}
+}
+func TestConcreteTaskStallGetsOneRecoveryTurn(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("task README"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rt, requests := newToolLoopRuntime(t, root, []string{
+		"Hello! What would you like me to implement?",
+		`{"tool":"builtin.read_file","arguments":{"path":"README.md"}}`,
+		"implemented after reading",
+	})
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "implement the README update", &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "implemented after reading\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(*requests) != 3 {
+		t.Fatalf("requests=%d", len(*requests))
+	}
+	if !strings.Contains((*requests)[1], "concrete repository task") || !strings.Contains((*requests)[1], "Start the task now") {
+		t.Fatalf("task-start recovery prompt was not sent: %s", (*requests)[1])
+	}
+	if !strings.Contains((*requests)[2], "task README") {
+		t.Fatalf("tool result was not returned after recovery: %s", (*requests)[2])
+	}
+}
+
+func TestSimpleGreetingDoesNotGetTaskStartRecovery(t *testing.T) {
+	root := t.TempDir()
+	rt, requests := newToolLoopRuntime(t, root, []string{
+		"Hello! How can I help with your coding task?",
+	})
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "hello", &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(*requests) != 1 {
+		t.Fatalf("greeting should not trigger recovery, requests=%d", len(*requests))
+	}
+	if strings.Contains((*requests)[0], "concrete repository task") {
+		t.Fatalf("unexpected task-start recovery prompt: %s", (*requests)[0])
+	}
+}
+
+func TestConcreteTaskStallRecoveryFailureReturnsError(t *testing.T) {
+	root := t.TempDir()
+	rt, _ := newToolLoopRuntime(t, root, []string{
+		"Hello! What would you like me to implement?",
+		"Please provide more details about what you want me to change.",
+	})
+	defer rt.Close()
+	err := rt.RunInstruction(context.Background(), "implement the README update", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "task-start recovery failed") || !strings.Contains(err.Error(), "Please provide more details") {
+		t.Fatalf("err=%v", err)
+	}
+}
 func TestRepeatedToolCallReportsToolArgumentsAndPreviousResult(t *testing.T) {
 	root := t.TempDir()
 	call := `{"tool":"builtin.read_file","arguments":{"path":"acenga.d"}}`
-	rt, _ := newToolLoopRuntime(t, root, []string{call, call})
+	rt, _ := newToolLoopRuntime(t, root, []string{call, call, call})
 	defer rt.Close()
 	err := rt.RunInstruction(context.Background(), "read acenga.d", &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "repeated tool call detected") || !strings.Contains(err.Error(), "builtin.read_file") || !strings.Contains(err.Error(), "acenga.d") || !strings.Contains(err.Error(), "does not exist within cwd") {
+	if err == nil || !strings.Contains(err.Error(), "repeated tool call detected after recovery") || !strings.Contains(err.Error(), "builtin.read_file") || !strings.Contains(err.Error(), "acenga.d") || !strings.Contains(err.Error(), "does not exist within cwd") {
 		t.Fatalf("err=%v", err)
 	}
 	if strings.Contains(err.Error(), "GetFileAttributesEx") {
@@ -119,6 +231,69 @@ func TestRepeatedToolCallReportsToolArgumentsAndPreviousResult(t *testing.T) {
 	}
 }
 
+func TestRepeatedToolCallRecoveryAllowsFinalAnswer(t *testing.T) {
+	root := t.TempDir()
+	call := `{"tool":"builtin.read_file","arguments":{"path":"missing.txt"}}`
+	rt, requests := newToolLoopRuntime(t, root, []string{call, call, "I will stop repeating and report the missing file."})
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "inspect missing file", &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "missing file") {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(*requests) != 3 || !strings.Contains((*requests)[2], "Do not repeat the same tool call") {
+		t.Fatalf("requests=%v", *requests)
+	}
+}
+
+func TestAutoCompactRunsAfterInstructionNotBeforeToolResultIsRead(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("raw tool result that must reach the next model turn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rt, requests := newToolLoopRuntime(t, root, []string{
+		`{"tool":"builtin.read_file","arguments":{"path":"README.md"}}`,
+		"final answer after raw tool result",
+		"compact summary",
+	})
+	defer rt.Close()
+	rt.Config.Compact.Enabled = true
+	rt.Config.Compact.TriggerContextRatio = 0.01
+	rt.Config.Compact.TriggerTurns = 1
+	rt.Config.Compact.ContextTokens = 1
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "read README", &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(*requests) < 2 {
+		t.Fatalf("requests=%d", len(*requests))
+	}
+	if !strings.Contains((*requests)[1], "raw tool result that must reach the next model turn") {
+		t.Fatalf("tool result was compacted before the next model turn: %s", (*requests)[1])
+	}
+}
+func TestAddMessageStoresTokenEstimateForContextRatio(t *testing.T) {
+	root := t.TempDir()
+	rt, _ := newToolLoopRuntime(t, root, []string{})
+	defer rt.Close()
+	rt.Config.Compact.Enabled = false
+	if _, err := rt.addMessage(context.Background(), "user", strings.Repeat("x", 20)); err != nil {
+		t.Fatal(err)
+	}
+	estimate, err := rt.Store.UncompactedTokenEstimate(context.Background(), rt.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if estimate != 5 {
+		t.Fatalf("estimate=%d", estimate)
+	}
+	rt.Config.Compact.ContextTokens = 10
+	if ratio := float64(estimate) / float64(rt.currentContextTokenLimit()); ratio < 0.5 {
+		t.Fatalf("ratio=%f", ratio)
+	}
+}
 func TestToolLoopLimitReportsCallHistory(t *testing.T) {
 	root := t.TempDir()
 	answers := make([]string, 8)
@@ -133,6 +308,20 @@ func TestToolLoopLimitReportsCallHistory(t *testing.T) {
 	}
 }
 
+func TestToolLoopMaxTurnsCanBeRaised(t *testing.T) {
+	root := t.TempDir()
+	answers := make([]string, 10)
+	for i := range answers {
+		answers[i] = fmt.Sprintf(`{"tool":"builtin.read_file","arguments":{"path":"missing-%d.txt"}}`, i)
+	}
+	rt, _ := newToolLoopRuntime(t, root, answers)
+	defer rt.Close()
+	rt.MaxTurns = 10
+	err := rt.RunInstruction(context.Background(), "inspect missing files", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "tool loop exceeded 10 turns; calls:") || !strings.Contains(err.Error(), "missing-9.txt") {
+		t.Fatalf("err=%v", err)
+	}
+}
 func newToolLoopRuntime(t *testing.T, root string, answers []string) (*Runtime, *[]string) {
 	t.Helper()
 	var mu sync.Mutex

@@ -11,8 +11,9 @@ import (
 var ErrHelp = errors.New("help requested")
 
 type Options struct {
-	CWD, ConfigPath, StateDir, Mode, Profile, Model, Instruction    string
-	Init, ShowVersion, NoPersist, DryRun, ReadStdin, NonInteractive bool
+	CWD, ConfigPath, StateDir, Mode, Profile, Model, Instruction, InstructionFile string
+	Init, ShowVersion, NoPersist, DryRun, ReadStdin, NonInteractive               bool
+	MaxTurns                                                                      int
 }
 
 func Parse(args []string, out io.Writer) (Options, error) {
@@ -32,6 +33,8 @@ func Parse(args []string, out io.Writer) (Options, error) {
 	set.BoolVar(&o.DryRun, "dry-run", false, "do not modify project files")
 	set.BoolVar(&o.NonInteractive, "non-interactive", false, "fail instead of prompting for confirmation")
 	set.BoolVar(&o.ReadStdin, "stdin", false, "append stdin to instruction")
+	set.IntVar(&o.MaxTurns, "max-turns", 0, "maximum model/tool loop turns")
+	set.StringVar(&o.InstructionFile, "instruction-file", "", "append instruction from file")
 	help := set.Bool("help", false, "print help")
 	if e := set.Parse(args); e != nil {
 		if errors.Is(e, flag.ErrHelp) {
@@ -61,6 +64,8 @@ Usage: coderenga [options] [instruction]
   --profile <name>   LLM profile
   --model <name>     Model override
   --stdin            Append standard input
+  --instruction-file <path> Append instruction from file
+  --max-turns <n>    Maximum model/tool loop turns
   --no-persist       Use in-memory storage
   --dry-run          Do not modify project files
   --non-interactive  Fail instead of prompting for confirmation

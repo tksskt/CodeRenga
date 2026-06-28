@@ -42,15 +42,19 @@ type StorageConfig struct {
 	Path      string
 	NoPersist bool
 }
-type CompactLevel struct{ TargetTokens int }
+type CompactLevel struct {
+	TargetTokens int `json:"target_tokens"`
+}
 type CompactConfig struct {
-	Enabled             bool
-	TriggerContextRatio float64
-	TriggerTurns        int
-	KeepRecentTurns     int
-	PromptFile          string
-	Profile             string
-	Levels              map[string]CompactLevel
+	Enabled             bool                    `json:"enabled"`
+	ContextTokens       int                     `json:"context_tokens"`
+	Level               string                  `json:"level"`
+	TriggerContextRatio float64                 `json:"trigger_context_ratio"`
+	TriggerTurns        int                     `json:"trigger_turns"`
+	KeepRecentTurns     int                     `json:"keep_recent_turns"`
+	PromptFile          string                  `json:"prompt_file"`
+	Profile             string                  `json:"profile"`
+	Levels              map[string]CompactLevel `json:"levels"`
 }
 type ShellRule struct {
 	Cmd     string   `json:"cmd"`
@@ -77,7 +81,7 @@ type MCPServer struct {
 }
 
 func Defaults() Config {
-	return Config{DefaultProfile: "local", DefaultMode: "coder", Profiles: map[string]Profile{}, Prompt: PromptConfig{ProjectInstructionFiles: []string{".coderenga/instructions.md", "CODERENGA.md", "AGENTS.md"}, MissingSystemPrompt: "error"}, Storage: StorageConfig{Enabled: true, Driver: "sqlite"}, Compact: CompactConfig{Enabled: true, TriggerContextRatio: .75, TriggerTurns: 30, KeepRecentTurns: 10, Profile: "local", Levels: map[string]CompactLevel{"light": {6000}, "normal": {3000}, "hard": {1200}}}, ShellPolicy: ShellPolicy{Unknown: "confirm"}, MCP: MCPConfig{Enabled: true, Servers: map[string]MCPServer{}}, ToolPolicies: map[string]string{}}
+	return Config{DefaultProfile: "local", DefaultMode: "coder", Profiles: map[string]Profile{}, Prompt: PromptConfig{ProjectInstructionFiles: []string{".coderenga/instructions.md", "CODERENGA.md", "AGENTS.md"}, MissingSystemPrompt: "error"}, Storage: StorageConfig{Enabled: true, Driver: "sqlite"}, Compact: CompactConfig{Enabled: true, ContextTokens: 4096, Level: "normal", TriggerContextRatio: .75, TriggerTurns: 30, KeepRecentTurns: 10, Profile: "local", Levels: map[string]CompactLevel{"light": {6000}, "normal": {3000}, "hard": {1200}}}, ShellPolicy: ShellPolicy{Unknown: "confirm"}, MCP: MCPConfig{Enabled: true, Servers: map[string]MCPServer{}}, ToolPolicies: map[string]string{}}
 }
 
 func Load(binaryDir, cwd, explicit string) (Config, []string, error) {
@@ -110,7 +114,7 @@ func Load(binaryDir, cwd, explicit string) (Config, []string, error) {
 	if err != nil {
 		return c, nil, fmt.Errorf("failed to load config file: %s\n%w", configPath, err)
 	}
-	for _, key := range []string{"profiles", "mcp", "prompt", "shell_policy", "storage", "compact"} {
+	for _, key := range []string{"profiles", "mcp", "prompt", "shell_policy", "storage"} {
 		if _, ok := raw[key]; ok {
 			return c, nil, ErrOldFormat
 		}
@@ -127,6 +131,13 @@ func Load(binaryDir, cwd, explicit string) (Config, []string, error) {
 	if app.DefaultProfile != "" {
 		c.DefaultProfile = app.DefaultProfile
 	}
+	if compactRaw, ok := raw["compact"]; ok {
+		var compactErr error
+		c.Compact, compactErr = mergeCompactConfigJSON(c.Compact, compactRaw)
+		if compactErr != nil {
+			return c, nil, fmt.Errorf("failed to load config file: %s\n%w", configPath, compactErr)
+		}
+	}
 	database := app.State.Database
 	if database == "" {
 		database = "coderenga.db"
@@ -135,7 +146,14 @@ func Load(binaryDir, cwd, explicit string) (Config, []string, error) {
 	c.Prompt.SystemFiles = []string{filepath.Join(baseDir, "prompts", "default.md")}
 	c.Prompt.GlobalModeDir = filepath.Join(baseDir, "modes")
 	c.Prompt.ModeDir = filepath.Join(cwd, ".coderenga", "modes")
-	c.Compact.PromptFile = filepath.Join(baseDir, "prompts", "compact.md")
+	if err := validateCompactConfig(c.Compact); err != nil {
+		return c, nil, fmt.Errorf("failed to load config file: %s\n%w", configPath, err)
+	}
+	if c.Compact.PromptFile == "" {
+		c.Compact.PromptFile = filepath.Join(baseDir, "prompts", "compact.md")
+	} else if !filepath.IsAbs(c.Compact.PromptFile) {
+		c.Compact.PromptFile = filepath.Join(baseDir, c.Compact.PromptFile)
+	}
 
 	var llm struct {
 		Version        int                `json:"version"`
@@ -166,22 +184,113 @@ func Load(binaryDir, cwd, explicit string) (Config, []string, error) {
 	}
 	toolsPath := filepath.Join(baseDir, "tools.json")
 	var toolsFile struct {
-		Version     int               `json:"version"`
-		Policies    map[string]string `json:"policies"`
-		ShellPolicy ShellPolicy       `json:"shellPolicy"`
+		// Canonical fields
+		ToolPolicy  map[string]string `json:"tool_policy"`
+		ShellPolicy ShellPolicy       `json:"shell_policy"`
+		// Legacy fields (backward compatibility)
+		Policies          map[string]string `json:"policies"`
+		LegacyShellPolicy ShellPolicy       `json:"shellPolicy"`
 	}
-	if _, err = readOptionalJSON(toolsPath, &toolsFile); err != nil {
+	toolsRaw, err := readOptionalJSON(toolsPath, &toolsFile)
+	if err != nil {
 		return c, nil, fmt.Errorf("failed to load config file: %s\n%w", toolsPath, err)
 	}
-	if toolsFile.Policies != nil {
+	// Load ToolPolicies: canonical tool_policy wins over legacy policies
+	if toolsFile.ToolPolicy != nil {
+		c.ToolPolicies = toolsFile.ToolPolicy
+	} else if toolsFile.Policies != nil {
 		c.ToolPolicies = toolsFile.Policies
 	}
-	if toolsFile.ShellPolicy.Unknown != "" {
-		c.ShellPolicy = toolsFile.ShellPolicy
+	// Load ShellPolicy: canonical shell_policy wins over legacy shellPolicy.
+	// Partial shell_policy keeps defaults, so unknown defaults to confirm.
+	if _, ok := toolsRaw["shell_policy"]; ok {
+		c.ShellPolicy = mergeShellPolicy(c.ShellPolicy, toolsFile.ShellPolicy)
+	} else if _, ok := toolsRaw["shellPolicy"]; ok {
+		c.ShellPolicy = mergeShellPolicy(c.ShellPolicy, toolsFile.LegacyShellPolicy)
 	}
 	return c, []string{configPath, llmPath, mcpPath, toolsPath}, nil
 }
 
+func validateCompactConfig(compact CompactConfig) error {
+	if !validCompactLevel(compact.Level) {
+		return fmt.Errorf("invalid compact.level %q", compact.Level)
+	}
+	for name := range compact.Levels {
+		if !validCompactLevel(name) {
+			return fmt.Errorf("invalid compact.levels key %q", name)
+		}
+	}
+	return nil
+}
+
+func validCompactLevel(level string) bool {
+	switch level {
+	case "light", "normal", "hard":
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeCompactConfigJSON(base CompactConfig, raw json.RawMessage) (CompactConfig, error) {
+	var override CompactConfig
+	if err := json.Unmarshal(raw, &override); err != nil {
+		return base, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return base, err
+	}
+	if _, ok := fields["enabled"]; ok {
+		base.Enabled = override.Enabled
+	}
+	if _, ok := fields["context_tokens"]; ok {
+		base.ContextTokens = override.ContextTokens
+	}
+	if _, ok := fields["level"]; ok {
+		base.Level = override.Level
+	}
+	if _, ok := fields["trigger_context_ratio"]; ok {
+		base.TriggerContextRatio = override.TriggerContextRatio
+	}
+	if _, ok := fields["trigger_turns"]; ok {
+		base.TriggerTurns = override.TriggerTurns
+	}
+	if _, ok := fields["keep_recent_turns"]; ok {
+		base.KeepRecentTurns = override.KeepRecentTurns
+	}
+	if _, ok := fields["prompt_file"]; ok {
+		base.PromptFile = override.PromptFile
+	}
+	if _, ok := fields["profile"]; ok {
+		base.Profile = override.Profile
+	}
+	if _, ok := fields["levels"]; ok {
+		if base.Levels == nil {
+			base.Levels = map[string]CompactLevel{}
+		}
+		for name, level := range override.Levels {
+			base.Levels[name] = level
+		}
+	}
+	return base, nil
+}
+
+func mergeShellPolicy(base, override ShellPolicy) ShellPolicy {
+	if override.Unknown != "" {
+		base.Unknown = override.Unknown
+	}
+	if override.Allow != nil {
+		base.Allow = override.Allow
+	}
+	if override.Confirm != nil {
+		base.Confirm = override.Confirm
+	}
+	if override.Block != nil {
+		base.Block = override.Block
+	}
+	return base
+}
 func readJSON(path string, dst any) (map[string]json.RawMessage, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

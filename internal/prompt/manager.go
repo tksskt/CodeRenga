@@ -14,6 +14,7 @@ type Mode struct {
 	Name, Description, Profile, Prompt string
 	Write, Shell                       string
 	MCP, PlanFirst                     bool
+	ToolAllow, ToolDeny                []string
 }
 type Manager struct {
 	cfg     config.Config
@@ -114,10 +115,24 @@ func parseMode(s, fallback string) Mode {
 			m.MCP = v == "true"
 		case "plan_first":
 			m.PlanFirst = v == "true"
+		case "tool_allow":
+			m.ToolAllow = parseCSV(v)
+		case "tool_deny":
+			m.ToolDeny = parseCSV(v)
 		}
 	}
 	m.Prompt = strings.TrimSpace(parts[2])
 	return m
+}
+func parseCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 func (m *Manager) Build(mode string) string {
 	v := m.modes[mode]

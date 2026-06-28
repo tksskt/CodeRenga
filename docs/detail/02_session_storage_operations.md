@@ -15,7 +15,7 @@
 - mcp_tools_cache: MCP tool schema のキャッシュ
 - audit_logs: 承認、拒否、ブロック、エラーなどの監査イベント
 
-プロンプトファイルや config が変更された場合、再開時に fingerprint 差分を検出して警告を表示する。
+プロンプトファイルや config が変更された場合、再開時に fingerprint 差分を検出して警告を表示する。config fingerprint は構造と非 secret 値を対象にし、`apiKey`、`token`、`secret`、`password` などの secret 値は値そのものではなく presence と field name のみを反映する。
 
 ### 12.1 DB 配置
 
@@ -163,7 +163,7 @@ DB には全履歴を保存するが、LLM へは全履歴を渡さない。毎 
 
 ### 12.5 圧縮
 
-圧縮は古い messages を削除せず、`summaries` に構造化要約を追加する。圧縮後、対象 message は `compacted = 1` として扱い、通常 context からは除外する。`/compact light|normal|hard` により手動圧縮できる。
+圧縮は古い messages を削除せず、`summaries` に構造化要約を追加する。圧縮後、対象 message は `compacted = 1` として扱い、通常 context からは除外する。`/compact light|normal|hard` により手動圧縮できる。自動圧縮は `config.json` の `compact.level` を使用する。未指定時は `normal` を使うが、未知の level は起動時設定エラーにする。level は `light` / `normal` / `hard` の固定3段階のみで、custom level はサポートしない。`compact.levels` は固定3段階それぞれの `target_tokens` 上書きにだけ使い、未知キーは設定エラーにする。各 level の `target_tokens` は context window ではなく、要約生成プロンプトまたは圧縮戦略へ渡す目標長として扱う。
 
 圧縮トリガー:
 
@@ -264,12 +264,3 @@ DB 化により以下をサポートする。
 - shell 実行をユーザーが制御できること
 - プロンプトとモードをユーザーが自由に差し替えられること
 - MCP サーバー追加時に本体の再ビルドが不要であること
-
-
-
-
-
-
-
-
-

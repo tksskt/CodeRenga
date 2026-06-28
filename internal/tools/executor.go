@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tks/coderenga/internal/policy"
 	"github.com/tks/coderenga/internal/storage"
 	"sort"
 	"strings"
@@ -33,37 +34,54 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	if !ok {
 		return Result{}, fmt.Errorf("unknown tool %q", req.Name)
 	}
-	levels := []Level{t.Policy()}
+	inspectors := []policy.Inspector{
+		policy.InspectorFunc(func(policy.Request) policy.Result {
+			level := t.Policy()
+			return policy.Result{Decision: policyFromLevel(level), Reason: "tool manifest policy: " + level.String()}
+		}),
+	}
 	if e.PolicyDecision != nil {
-		levels = append(levels, e.PolicyDecision(req.Name))
+		inspectors = append(inspectors, policy.InspectorFunc(func(policy.Request) policy.Result {
+			level := e.PolicyDecision(req.Name)
+			return policy.Result{Decision: policyFromLevel(level), Reason: "tool_policy: " + level.String()}
+		}))
 	}
 	if e.ModeDecision != nil {
-		levels = append(levels, e.ModeDecision(req.Context.Mode, t))
+		inspectors = append(inspectors, policy.InspectorFunc(func(policy.Request) policy.Result {
+			level := e.ModeDecision(req.Context.Mode, t)
+			return policy.Result{Decision: policyFromLevel(level), Reason: "mode policy: " + level.String()}
+		}))
 	}
 	if dynamic, ok := t.(RequestPolicy); ok {
-		levels = append(levels, dynamic.Decision(req))
+		inspectors = append(inspectors, policy.InspectorFunc(func(policy.Request) policy.Result {
+			level := dynamic.Decision(req)
+			return policy.Result{Decision: policyFromLevel(level), Reason: "request policy: " + level.String()}
+		}))
 	}
-	decision := Max(levels...)
+	inspectors = append(inspectors, policy.InspectorFunc(func(policy.Request) policy.Result { return safetyResult(req) }))
+	policyDecision, reasons := policy.Engine{Inspectors: inspectors}.Decide(policy.Request{Tool: req.Name, Arguments: req.Arguments, Mode: req.Context.Mode, CWD: req.Context.CWD})
+	decision := levelFromPolicy(policyDecision)
+	policyReasons := policyReasonStrings(reasons)
 	if decision == Block {
 		res := Result{OK: false, Error: "tool blocked by policy"}
-		e.record(ctx, req, res, decision, false, 0)
+		e.record(ctx, req, res, decision, false, 0, policyReasons)
 		return res, nil
 	}
 	if req.Context.DryRun && hasSideEffects(t) {
 		res := dryRunResult(req)
-		e.record(ctx, req, res, decision, false, 0)
+		e.record(ctx, req, res, decision, false, 0, policyReasons)
 		return res, nil
 	}
 	approved := decision == Allow
 	if decision == Confirm || decision == Unknown {
 		if e.NonInteractive {
 			res := Result{OK: false, Error: "operation requires confirmation in non-interactive mode"}
-			e.record(ctx, req, res, decision, false, 0)
+			e.record(ctx, req, res, decision, false, 0, policyReasons)
 			return res, ConfirmationRequiredError{Tool: req.Name}
 		}
 		if e.Approver == nil || !e.Approver(req.Name, req.Arguments) {
 			res := Result{OK: false, Error: "tool execution was not approved"}
-			e.record(ctx, req, res, decision, false, 0)
+			e.record(ctx, req, res, decision, false, 0, policyReasons)
 			return res, nil
 		}
 		approved = true
@@ -78,11 +96,11 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		res = Result{OK: false, Error: err.Error()}
 	}
-	e.record(ctx, req, res, decision, approved, duration)
+	e.record(ctx, req, res, decision, approved, duration, policyReasons)
 	return res, nil
 }
 
-func (e *Executor) record(ctx context.Context, req Request, res Result, decision Level, approved bool, duration time.Duration) {
+func (e *Executor) record(ctx context.Context, req Request, res Result, decision Level, approved bool, duration time.Duration, policyReasons []string) {
 	if e.Store == nil {
 		return
 	}
@@ -93,8 +111,50 @@ func (e *Executor) record(ctx context.Context, req Request, res Result, decision
 		}
 	}
 	b, _ := json.Marshal(redact(args))
-	_ = e.Store.Audit(ctx, req.Context.SessionID, "tool_finished", map[string]any{"tool": req.Name, "policy": decision.String(), "approved": approved, "ok": res.OK, "dry_run": req.Context.DryRun})
+	_ = e.Store.Audit(ctx, req.Context.SessionID, "tool_finished", map[string]any{"tool": req.Name, "policy": decision.String(), "policy_reasons": policyReasons, "approved": approved, "ok": res.OK, "dry_run": req.Context.DryRun})
 	_ = e.Store.ToolRunDetailed(ctx, req.Context.SessionID, req.Name, strings.Split(req.Name, ".")[0], string(b), res.Content, map[bool]string{true: "ok", false: "failed"}[res.OK], decision.String(), approved, duration)
+}
+
+func policyReasonStrings(reasons []policy.Result) []string {
+	out := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		if reason.Reason == "" {
+			continue
+		}
+		out = append(out, reason.Decision.String()+": "+reason.Reason)
+	}
+	return out
+}
+func policyFromLevel(level Level) policy.Decision {
+	switch level {
+	case Allow:
+		return policy.AutoApprove
+	case Confirm:
+		return policy.AskUser
+	case Block:
+		return policy.Reject
+	default:
+		return policy.Unknown
+	}
+}
+
+func levelFromPolicy(decision policy.Decision) Level {
+	switch decision {
+	case policy.AutoApprove:
+		return Allow
+	case policy.AskUser:
+		return Confirm
+	case policy.Reject:
+		return Block
+	default:
+		return Unknown
+	}
+}
+
+func safetyResult(req Request) policy.Result {
+	path, _ := req.Arguments["path"].(string)
+	shellMode, _ := req.Arguments["shell_mode"].(bool)
+	return policy.SafetyCheck(policy.SafetySubject{Tool: req.Name, CWD: req.Context.CWD, Path: path, ShellMode: shellMode, SandboxReady: true})
 }
 
 func hasSideEffects(tool Tool) bool {

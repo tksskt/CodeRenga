@@ -16,6 +16,25 @@ func TestParseInstructionAndCWD(t *testing.T) {
 	}
 }
 
+func TestParseInstructionFile(t *testing.T) {
+	got, err := Parse([]string{"--instruction-file", "task.txt", "prefix"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InstructionFile != "task.txt" || got.Instruction != "prefix" {
+		t.Fatalf("unexpected options: %#v", got)
+	}
+}
+
+func TestParseMaxTurns(t *testing.T) {
+	got, err := Parse([]string{"--max-turns", "16", "review"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxTurns != 16 || got.Instruction != "review" {
+		t.Fatalf("unexpected options: %#v", got)
+	}
+}
 func TestParseHelp(t *testing.T) {
 	var out bytes.Buffer
 	_, err := Parse([]string{"--help"}, &out)

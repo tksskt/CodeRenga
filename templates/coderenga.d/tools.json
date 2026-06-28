@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "policies": {
+  "plugins": {},
+  "tool_policy": {
     "builtin.read_file": "allow",
     "builtin.write_file": "allow",
     "builtin.apply_patch": "allow",
@@ -8,5 +9,7 @@
     "git.status": "allow",
     "git.diff": "allow"
   },
-  "plugins": {}
+  "shell_policy": {
+    "unknown": "confirm"
+  }
 }
