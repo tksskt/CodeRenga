@@ -84,7 +84,8 @@ func TestCoderengaModeWritePolicy(t *testing.T) {
 			t.Fatalf("failed to read %s: %v", name, err)
 		}
 
-		if !strings.Contains(string(body), expected) {
+		text := strings.ReplaceAll(string(body), "\r\n", "\n")
+		if !strings.Contains(text, expected) {
 			t.Fatalf("%s does not contain %q", name, expected)
 		}
 	}
