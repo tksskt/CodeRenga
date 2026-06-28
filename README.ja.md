@@ -14,7 +14,7 @@ Cloud LLM thinks. Local LLM builds. CodeRenga links the verses.
 
 ## 開発
 
-ローカルでは Go 1.26.4 を使用し、`go.mod` では `go 1.25.0` を宣言しています。各スクリプトは `.local/go/bin` を優先して使用し、モジュールキャッシュとビルドキャッシュは `.local/cache/` 配下に保持します。
+ローカルでは Go 1.26.4 を使用し、`go.mod` では `go 1.25.0` を宣言しています。各スクリプトは `.local/go/bin` を優先して使用し、モジュールキャッシュとビルドキャッシュは `.local/cache/` 配下に保持します。PowerShell がない環境では `make` が `scripts/local-go.sh` を使用し、Go を `.local/go` に取得したうえで、`GOMODCACHE`、`GOCACHE`、`GOPATH`、`GOBIN` を `.local/` 配下に閉じます。
 
 ```sh
 make setup
@@ -24,7 +24,7 @@ make test
 make build
 ```
 
-ビルドされたバイナリは `.local/bin/coderenga.exe` に出力されます。初期化テンプレートは実行ファイルに埋め込まれているため、実行時に外部の `templates` ディレクトリは不要です。
+ビルドされたバイナリは Windows では `.local/bin/coderenga.exe`、macOS/Linux では `.local/bin/coderenga` に出力されます。初期化テンプレートは実行ファイルに埋め込まれているため、実行時に外部の `templates` ディレクトリは不要です。
 
 ## Windows アプリケーションアイコン
 

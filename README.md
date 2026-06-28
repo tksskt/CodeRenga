@@ -14,7 +14,7 @@ CodeRenga applies the same idea to software development. A cloud LLM considers a
 
 ## Development
 
-Go 1.26.4 is used locally and `go.mod` declares `go 1.25.0`. The scripts prefer `.local/go/bin` and keep module and build caches under `.local/cache/`.
+Go 1.26.4 is used locally and `go.mod` declares `go 1.25.0`. The scripts prefer `.local/go/bin` and keep module and build caches under `.local/cache/`. If PowerShell is unavailable, `make` uses `scripts/local-go.sh`, which downloads Go into `.local/go` and keeps `GOMODCACHE`, `GOCACHE`, `GOPATH`, and `GOBIN` inside `.local/`.
 
 ```powershell
 make setup
@@ -24,7 +24,23 @@ make test
 make build
 ```
 
-The binary is written to `.local/bin/coderenga.exe`. Initialization templates are embedded, so the executable does not require an external `templates` directory.
+The binary is written to `.local/bin/coderenga.exe` on Windows and `.local/bin/coderenga` on macOS/Linux. Initialization templates are embedded, so the executable does not require an external `templates` directory.
+
+## Install from GitHub Releases
+
+Download the asset for your OS from GitHub Releases, then extract it.
+
+Check the binary and initialize the default configuration:
+
+```powershell
+.\coderenga.exe --version
+.\coderenga.exe --init
+```
+
+```bash
+./coderenga --version
+./coderenga --init
+```
 
 ## Windows application icon
 

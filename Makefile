@@ -1,19 +1,46 @@
+POWERSHELL := $(shell command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null)
+
 .PHONY: setup fmt lint test windows-resource build
 
 setup:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1; \
+	else \
+		bash scripts/local-go.sh setup; \
+	fi
 
 fmt:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fmt.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/fmt.ps1; \
+	else \
+		bash scripts/local-go.sh fmt; \
+	fi
 
 lint:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/lint.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/lint.ps1; \
+	else \
+		bash scripts/local-go.sh lint; \
+	fi
 
 test:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1; \
+	else \
+		bash scripts/local-go.sh test; \
+	fi
 
 windows-resource:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-windows-resources.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/generate-windows-resources.ps1; \
+	else \
+		echo "PowerShell is required for windows-resource"; \
+		exit 1; \
+	fi
 
 build:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
+	@if [ -n "$(POWERSHELL)" ]; then \
+		"$(POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1; \
+	else \
+		bash scripts/local-go.sh build; \
+	fi
