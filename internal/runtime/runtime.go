@@ -47,6 +47,8 @@ type Runtime struct {
 	MaxTurns                                                    int
 }
 
+const defaultMaxTurns = 16
+
 func New(ctx context.Context, o Options) (*Runtime, error) {
 	cfg, configFiles, e := config.Load(o.BinaryDir, o.CWD, o.ConfigPath)
 	if e != nil {
@@ -419,7 +421,7 @@ func (rt *Runtime) maxTurns() int {
 	if rt.MaxTurns > 0 {
 		return rt.MaxTurns
 	}
-	return 8
+	return defaultMaxTurns
 }
 
 func printToolArguments(out io.Writer, arguments map[string]any) {

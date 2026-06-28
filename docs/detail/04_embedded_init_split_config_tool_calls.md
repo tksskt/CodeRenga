@@ -61,7 +61,7 @@ LLMからRuntimeへの正式なTool Callは、次のJSONオブジェクトだけ
 - 挨拶や一般会話は自然文で応答し、Toolを要求しない。Runtimeも既知の単純な挨拶に対する副作用Tool要求を実行しない。
 - Tool実装の失敗はOSの生エラーでloopを中断せず、失敗したTool ResultとしてLLMへ返す。
 - 直前のTool Result後に同一Tool名・同一引数が連続した場合は反復loopとして停止し、Tool名、引数、直前結果をエラーへ含める。
-- 既定 8 turn、または `--max-turns` で指定した上限に達した場合は、上限までのTool Call履歴をエラーへ含める。
+- default turn limit（既定値: 16）、または `--max-turns` で指定した上限に達した場合は、上限までのTool Call履歴をエラーへ含める。
 
 ## 4. dry-run
 

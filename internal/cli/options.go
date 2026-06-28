@@ -33,7 +33,7 @@ func Parse(args []string, out io.Writer) (Options, error) {
 	set.BoolVar(&o.DryRun, "dry-run", false, "do not modify project files")
 	set.BoolVar(&o.NonInteractive, "non-interactive", false, "fail instead of prompting for confirmation")
 	set.BoolVar(&o.ReadStdin, "stdin", false, "append stdin to instruction")
-	set.IntVar(&o.MaxTurns, "max-turns", 0, "maximum model/tool loop turns")
+	set.IntVar(&o.MaxTurns, "max-turns", 0, "maximum model/tool loop turns (default: 16)")
 	set.StringVar(&o.InstructionFile, "instruction-file", "", "append instruction from file")
 	help := set.Bool("help", false, "print help")
 	if e := set.Parse(args); e != nil {
@@ -65,7 +65,7 @@ Usage: coderenga [options] [instruction]
   --model <name>     Model override
   --stdin            Append standard input
   --instruction-file <path> Append instruction from file
-  --max-turns <n>    Maximum model/tool loop turns
+  --max-turns <n>    Maximum model/tool loop turns (default: 16)
   --no-persist       Use in-memory storage
   --dry-run          Do not modify project files
   --non-interactive  Fail instead of prompting for confirmation

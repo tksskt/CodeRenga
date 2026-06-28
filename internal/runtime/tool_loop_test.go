@@ -296,19 +296,33 @@ func TestAddMessageStoresTokenEstimateForContextRatio(t *testing.T) {
 }
 func TestToolLoopLimitReportsCallHistory(t *testing.T) {
 	root := t.TempDir()
-	answers := make([]string, 8)
+	answers := make([]string, 16)
 	for i := range answers {
 		answers[i] = fmt.Sprintf(`{"tool":"builtin.read_file","arguments":{"path":"missing-%d.txt"}}`, i)
 	}
 	rt, _ := newToolLoopRuntime(t, root, answers)
 	defer rt.Close()
 	err := rt.RunInstruction(context.Background(), "inspect missing files", &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "tool loop exceeded 8 turns; calls:") || !strings.Contains(err.Error(), "missing-0.txt") || !strings.Contains(err.Error(), "missing-7.txt") {
+	if err == nil || !strings.Contains(err.Error(), "tool loop exceeded 16 turns; calls:") || !strings.Contains(err.Error(), "missing-0.txt") || !strings.Contains(err.Error(), "missing-15.txt") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestToolLoopMaxTurnsCanBeRaised(t *testing.T) {
+func TestRuntimeMaxTurnsUsesDefaultForZero(t *testing.T) {
+	rt := &Runtime{MaxTurns: 0}
+	if got := rt.maxTurns(); got != 16 {
+		t.Fatalf("maxTurns=%d", got)
+	}
+}
+
+func TestRuntimeMaxTurnsUsesExplicitPositiveValue(t *testing.T) {
+	rt := &Runtime{MaxTurns: 10}
+	if got := rt.maxTurns(); got != 10 {
+		t.Fatalf("maxTurns=%d", got)
+	}
+}
+
+func TestToolLoopMaxTurnsCanUseExplicitValue(t *testing.T) {
 	root := t.TempDir()
 	answers := make([]string, 10)
 	for i := range answers {

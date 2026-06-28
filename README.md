@@ -103,7 +103,7 @@ Tool calls use one JSON object with `tool` and `arguments`; XML-style tags are n
 
 
 
-Dry-run tool results explicitly report `executed=false`; contradictory model claims are not shown as the final answer. Greetings are answered without tools. Consecutive identical tool calls stop with the tool name, arguments, and prior result, while the eight-turn limit reports its call history. `--no-persist` uses only in-memory SQLite and does not touch the configured database file.
+Dry-run tool results explicitly report `executed=false`; contradictory model claims are not shown as the final answer. Greetings are answered without tools. Consecutive identical tool calls stop with the tool name, arguments, and prior result, while the default turn limit reports its call history. `--max-turns <n>` overrides the default turn limit (`16`). `--no-persist` uses only in-memory SQLite and does not touch the configured database file.
 
 
 
