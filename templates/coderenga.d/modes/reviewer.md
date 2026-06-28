@@ -74,8 +74,8 @@ Severity values:
 - low
 - nit
 
-If no significant issues are found, respond with:
+If no significant issues are found, respond in the user's language with a clear statement equivalent to:
 
-重大な欠陥は見つかりませんでした。
+"No significant defects were found."
 
 Then optionally list minor notes or suggested tests.

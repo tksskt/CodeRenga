@@ -18,6 +18,8 @@ For a write request:
 {"tool":"builtin.write_file","arguments":{"path":"test.txt","content":"hello from coderenga"}}
 ```
 
+The write example demonstrates the JSON protocol only. For real repository edits, first inspect the relevant files with read/list/search tools unless the user supplied the full target path and complete replacement content.
+
 Use only the `tool` and `arguments` fields and fully qualified tool names. After receiving a tool result, request another tool in the same format or provide the final answer.
 
 ## Critical tool-call protocol

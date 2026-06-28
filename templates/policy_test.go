@@ -97,9 +97,46 @@ func TestWorkerPromptTemplateHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, want := range []string{"Critical tool-call protocol", "exactly one JSON object", "Do not repeat the same tool call"} {
+	for _, want := range []string{"Critical tool-call protocol", "exactly one JSON object", "Do not repeat the same tool call", "The write example demonstrates the JSON protocol only"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default prompt missing %q", want)
+		}
+	}
+}
+
+func TestReviewerPromptLanguageNeutral(t *testing.T) {
+	body, err := fs.ReadFile(Files, "coderenga.d/modes/reviewer.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"user's language",
+		"No significant defects were found",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("reviewer prompt missing %q", want)
+		}
+	}
+}
+
+func TestCompactionPromptKeepsHandoffDetails(t *testing.T) {
+	body, err := fs.ReadFile(Files, "coderenga.d/prompts/compact.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"confirmed facts",
+		"assumptions",
+		"unresolved questions",
+		"exact file paths",
+		"what was verified",
+		"what was not tested",
+		"next concrete action",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("compact prompt missing %q", want)
 		}
 	}
 }
