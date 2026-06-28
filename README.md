@@ -30,6 +30,13 @@ The binary is written to `.local/bin/coderenga.exe` on Windows and `.local/bin/c
 
 Download the asset for your OS from GitHub Releases, then extract it.
 
+- Linux amd64: `coderenga-linux-amd64.tar.gz`
+- Windows amd64: `coderenga-windows-amd64.zip`
+- Intel Mac: `coderenga-darwin-amd64.tar.gz`
+- Apple Silicon Mac: `coderenga-darwin-arm64.tar.gz`
+
+macOS archives are currently unsigned and not notarized, so Gatekeeper may warn on first launch.
+
 Check the binary and initialize the default configuration:
 
 ```powershell

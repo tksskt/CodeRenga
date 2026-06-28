@@ -57,6 +57,22 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/linux-amd64/coderenga ./cmd/coderenga
           tar -C dist/linux-amd64 -czf dist/coderenga-linux-amd64.tar.gz coderenga
 
+      - name: Build macOS amd64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/darwin-amd64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/darwin-amd64/coderenga ./cmd/coderenga
+          tar -C dist/darwin-amd64 -czf dist/coderenga-darwin-amd64.tar.gz coderenga
+
+      - name: Build macOS arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/darwin-arm64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/darwin-arm64/coderenga ./cmd/coderenga
+          tar -C dist/darwin-arm64 -czf dist/coderenga-darwin-arm64.tar.gz coderenga
+
       - name: Smoke test Linux archive
         shell: bash
         run: |
@@ -82,6 +98,18 @@ jobs:
         with:
           name: coderenga-linux-amd64
           path: dist/coderenga-linux-amd64.tar.gz
+
+      - name: Upload macOS amd64 asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderenga-darwin-amd64
+          path: dist/coderenga-darwin-amd64.tar.gz
+
+      - name: Upload macOS arm64 asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderenga-darwin-arm64
+          path: dist/coderenga-darwin-arm64.tar.gz
 
   build-windows:
     name: Build Windows on Windows GARM runner
@@ -180,12 +208,29 @@ jobs:
           name: coderenga-windows-amd64
           path: dist
 
+      - name: Download macOS amd64 asset
+        uses: actions/download-artifact@v4
+        with:
+          name: coderenga-darwin-amd64
+          path: dist
+
+      - name: Download macOS arm64 asset
+        uses: actions/download-artifact@v4
+        with:
+          name: coderenga-darwin-arm64
+          path: dist
+
       - name: Create checksums
         shell: bash
         run: |
           set -euo pipefail
           cd dist
-          sha256sum coderenga-linux-amd64.tar.gz coderenga-windows-amd64.zip > checksums.txt
+          sha256sum \
+            coderenga-linux-amd64.tar.gz \
+            coderenga-windows-amd64.zip \
+            coderenga-darwin-amd64.tar.gz \
+            coderenga-darwin-arm64.tar.gz \
+            > checksums.txt
           cat checksums.txt
 
       - name: Show assets
@@ -202,6 +247,8 @@ jobs:
           files: |
             dist/coderenga-linux-amd64.tar.gz
             dist/coderenga-windows-amd64.zip
+            dist/coderenga-darwin-amd64.tar.gz
+            dist/coderenga-darwin-arm64.tar.gz
             dist/checksums.txt
           generate_release_notes: true
           overwrite_files: true
