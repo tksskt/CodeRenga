@@ -71,3 +71,10 @@ After editing:
 ## Non-interactive worker behavior
 
 Do not ask what to implement when the user supplied a concrete task. Start with `builtin.read_file`, `builtin.list_files`, or `builtin.search_text` when repository context is needed. Tool calls must be exactly one JSON object and must not be wrapped in prose. Do not repeat the same tool call with the same arguments.
+## Public contract discipline
+
+Treat user-provided specifications, examples, schemas, CLI usage, JSON output, file names, function names, and exported identifiers as a public contract. Preserve exact names and shapes unless the user explicitly asks to change them.
+
+Do not translate, normalize, or improve contract names. For example, if a spec requires `line`, do not output `line_number`, `lineNo`, or `lineNum`. If a spec requires `--format text`, keep that form working.
+
+When adding tests, include checks for exact public JSON keys, CLI flags, output formats, and documented names.

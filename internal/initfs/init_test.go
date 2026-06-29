@@ -42,3 +42,25 @@ func TestInitializeRefusesOverwrite(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+func TestInitializeCreatesPublicContractPromptTemplates(t *testing.T) {
+	root := t.TempDir()
+	if err := Initialize(root, templatefs.Files); err != nil {
+		t.Fatal(err)
+	}
+	checks := map[string][]string{
+		"prompts/default.md": {"Public contract preservation", "If the specification says `line`, keep `line`"},
+		"modes/coder.md":     {"Public contract discipline", "do not output `line_number`"},
+	}
+	for rel, wants := range checks {
+		body, err := os.ReadFile(filepath.Join(root, "coderenga.d", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("failed to read initialized %s: %v", rel, err)
+		}
+		text := string(body)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Fatalf("initialized %s missing %q", rel, want)
+			}
+		}
+	}
+}

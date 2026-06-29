@@ -83,11 +83,18 @@ func (rt *Runtime) runLlamaCppTools(ctx context.Context, instruction string, out
 	lastResults := map[string]string{}
 	var callHistory []string
 	var dryRunSkipped []tools.Request
+	loopState := newLoopRuntimeState()
 	loopRepairUsed := false
 	var nativeHistory []llm.Message
 	maxTurns := rt.maxTurns()
 turnLoop:
 	for turn := 0; turn < maxTurns; turn++ {
+		remaining := maxTurns - turn
+		if remaining <= 2 {
+			if _, err := rt.addMessage(ctx, "user", maxTurnReminder(remaining)); err != nil {
+				return err
+			}
+		}
 		msgs, err := rt.context(ctx)
 		if err != nil {
 			return err
@@ -140,9 +147,13 @@ turnLoop:
 			rt.recordTranscript(turn, "tool_call", call.Name, signature, "", "", "")
 			call.Context = tools.Context{CWD: rt.CWD, Mode: rt.Mode, SessionID: rt.SessionID, DryRun: rt.DryRun}
 			rt.recordToolStatus(call.Name, ToolCallRunning)
-			res, err := rt.Executor.Execute(ctx, call)
-			if err != nil {
-				return err
+			res, skipped := loopState.shouldSkipShell(call)
+			var execErr error
+			if !skipped {
+				res, execErr = rt.Executor.Execute(ctx, call)
+				if execErr != nil {
+					return execErr
+				}
 			}
 			lastResults[signature] = toolResultSummary(res)
 			status := ToolCallDone
@@ -154,7 +165,11 @@ turnLoop:
 			}
 			rt.recordToolStatus(call.Name, status)
 			rt.recordTranscript(turn, "tool_result", call.Name, signature, toolResultSummary(res), res.Error, "")
+			reminders := loopState.afterTool(call, res)
 			nativeHistory = append(nativeHistory, nativeToolMessage(callID, res))
+			for _, reminder := range reminders {
+				nativeHistory = append(nativeHistory, llm.Message{Role: "user", Content: reminder})
+			}
 			if rt.DryRun && rt.isSideEffectTool(call.Name) {
 				dryRunSkipped = append(dryRunSkipped, call)
 				fmt.Fprintf(out, "[dry-run] %s\n", call.Name)
@@ -162,7 +177,7 @@ turnLoop:
 			}
 		}
 	}
-	return fmt.Errorf("tool loop exceeded %d turns; calls: %s", maxTurns, strings.Join(callHistory, " -> "))
+	return maxTurnExceededError(maxTurns, callHistory, loopState)
 }
 
 func nativeToolRequest(raw llm.ToolCall, index int, safeToInternal map[string]string) (tools.Request, string, error) {

@@ -150,7 +150,7 @@ func TestNonInteractiveConfirmFailsWithoutPrompt(t *testing.T) {
 	defer rt.Close()
 	rt.Approve = func(string, map[string]any) bool { t.Fatal("non-interactive execution prompted"); return true }
 	err := rt.RunInstruction(context.Background(), "write debug.txt", &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "operation requires confirmation, but --non-interactive is enabled") || !strings.Contains(err.Error(), "tool: builtin.write_file") {
+	if err == nil || !strings.Contains(err.Error(), "tool builtin.write_file requires approval, but --non-interactive is set") || !strings.Contains(err.Error(), "--auto-approve write") {
 		t.Fatalf("err=%v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "debug.txt")); !os.IsNotExist(statErr) {
@@ -185,11 +185,80 @@ func TestCoderWritePolicyDoesNotAllowShellConfirm(t *testing.T) {
 	})
 	defer rt.Close()
 	err := rt.RunInstruction(context.Background(), "run echo", &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "tool: shell.run") {
+	if err == nil || !strings.Contains(err.Error(), "tool shell.run requires approval, but --non-interactive is set") || !strings.Contains(err.Error(), "--auto-approve shell") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
+func TestNonInteractiveShellRequiresExplicitAutoApprove(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", true, []string{
+		testShellToolCall(t, root, "blocked.txt"),
+	})
+	defer rt.Close()
+	err := rt.RunInstruction(context.Background(), "run shell", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "tool shell.run requires approval, but --non-interactive is set") || !strings.Contains(err.Error(), "--auto-approve shell") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "blocked.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("shell command ran: %v", statErr)
+	}
+}
+
+func TestNonInteractiveAutoApproveShellRunsShell(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", true, []string{
+		testShellToolCall(t, root, "ran.txt"),
+		"done",
+	})
+	defer rt.Close()
+	rt.Executor.AutoApprove = map[string]bool{"shell": true}
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "run shell", &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran.txt")); err != nil {
+		t.Fatalf("shell command did not run: %v", err)
+	}
+}
+
+func TestNonInteractiveAutoApproveReadWriteDoesNotRunShell(t *testing.T) {
+	root := t.TempDir()
+	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", true, []string{
+		testShellToolCall(t, root, "not-shell.txt"),
+	})
+	defer rt.Close()
+	rt.Executor.AutoApprove = map[string]bool{"read": true, "write": true}
+	err := rt.RunInstruction(context.Background(), "run shell", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--auto-approve shell") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "not-shell.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("shell command ran: %v", statErr)
+	}
+}
+
+func TestHelperProcessWriteFile(t *testing.T) {
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--coderenga-write-file" && i+1 < len(args) {
+			if err := os.WriteFile(args[i+1], []byte("ok"), 0o644); err != nil {
+				os.Exit(2)
+			}
+			os.Exit(0)
+		}
+	}
+}
+
+func testShellToolCall(t *testing.T, root, name string) string {
+	t.Helper()
+	argv := []string{os.Args[0], "-test.run=TestHelperProcessWriteFile", "--", "--coderenga-write-file", filepath.Join(root, name)}
+	call, err := json.Marshal(map[string]any{"tool": "shell.run", "arguments": map[string]any{"argv": argv}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(call)
+}
 func TestToolDenyBlocksWriteFile(t *testing.T) {
 	root := t.TempDir()
 	rt := newModePolicyRuntime(t, root, "coder", "allow", "allow", false, []string{

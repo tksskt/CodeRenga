@@ -153,3 +153,31 @@ func TestDocumenterModeTemplate(t *testing.T) {
 		}
 	}
 }
+func TestPublicContractPreservationPromptTemplates(t *testing.T) {
+	checks := map[string][]string{
+		"coderenga.d/prompts/default.md": {
+			"Public contract preservation",
+			"JSON keys, CLI flags, output formats, file names, function names",
+			"If the specification says `line`, keep `line`",
+			"do not change it to `line_number`, `lineNo`, `lineNum`",
+		},
+		"coderenga.d/modes/coder.md": {
+			"Public contract discipline",
+			"Preserve exact names and shapes",
+			"if a spec requires `line`, do not output `line_number`",
+			"If a spec requires `--format text`, keep that form working",
+		},
+	}
+	for path, wants := range checks {
+		body, err := fs.ReadFile(Files, path)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", path, err)
+		}
+		text := string(body)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q", path, want)
+			}
+		}
+	}
+}

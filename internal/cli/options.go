@@ -13,6 +13,7 @@ var ErrHelp = errors.New("help requested")
 type Options struct {
 	CWD, ConfigPath, StateDir, Mode, Profile, Model, Instruction, InstructionFile string
 	Init, ShowVersion, NoPersist, DryRun, ReadStdin, NonInteractive               bool
+	AutoApprove                                                                   []string
 	MaxTurns                                                                      int
 }
 
@@ -32,6 +33,7 @@ func Parse(args []string, out io.Writer) (Options, error) {
 	set.BoolVar(&o.NoPersist, "no-persist", false, "disable persistent storage")
 	set.BoolVar(&o.DryRun, "dry-run", false, "do not modify project files")
 	set.BoolVar(&o.NonInteractive, "non-interactive", false, "fail instead of prompting for confirmation")
+	set.Var((*stringList)(&o.AutoApprove), "auto-approve", "auto-approve tool categories in non-interactive mode: read,write,shell,git,dangerous,all")
 	set.BoolVar(&o.ReadStdin, "stdin", false, "append stdin to instruction")
 	set.IntVar(&o.MaxTurns, "max-turns", 0, "maximum model/tool loop turns (default: 16)")
 	set.StringVar(&o.InstructionFile, "instruction-file", "", "append instruction from file")
@@ -52,6 +54,18 @@ func Parse(args []string, out io.Writer) (Options, error) {
 	}
 	return o, nil
 }
+
+type stringList []string
+
+func (s *stringList) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 func WriteHelp(w io.Writer) {
 	fmt.Fprintln(w, `CodeRenga lightweight CLI coding agent.
 
@@ -69,6 +83,7 @@ Usage: coderenga [options] [instruction]
   --no-persist       Use in-memory storage
   --dry-run          Do not modify project files
   --non-interactive  Fail instead of prompting for confirmation
+  --auto-approve <list> Auto-approve categories in non-interactive mode
   --init             Create coderenga.d next to executable
   --version          Print version
   --help             Print help`)

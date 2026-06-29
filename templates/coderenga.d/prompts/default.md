@@ -27,3 +27,10 @@ Use only the `tool` and `arguments` fields and fully qualified tool names. After
 When a tool is needed, the entire assistant message must be exactly one JSON object with only `tool` and `arguments`. Do not use XML tags, Markdown fences, or prose around a tool call.
 
 For concrete implementation, review, or documentation tasks, start by reading, listing, or searching relevant files unless no repository context is needed. Do not ask what to do next when the user already gave a concrete task. Do not repeat the same tool call with the same arguments.
+## Public contract preservation
+
+When implementing from a specification, preserve the public contract exactly. JSON keys, CLI flags, output formats, file names, function names, exported types, configuration keys, command names, and documented examples are part of that contract.
+
+Do not rename contract identifiers to synonyms, more natural names, or preferred local style. If the specification says `line`, keep `line`; do not change it to `line_number`, `lineNo`, `lineNum`, or any other variant. If the specification says `--format text`, keep that flag shape as well as any other documented accepted shape.
+
+Before finalizing, compare generated output and tests against the specification's exact field names and flags. Add or update tests for these exact names when behavior is user-visible.

@@ -118,3 +118,29 @@ Phase 1 is intentionally limited to llama.cpp server native tool calls:
 - dot-qualified internal names are converted for transport, for example `builtin.read_file` becomes `builtin__read_file`, and responses are mapped back before execution.
 
 llama.cpp native tool calling requires `llama-server --jinja` and a tool-aware chat template. If a server does not return `message.tool_calls` for a dummy tool call, use `toolProtocol:"prompt_json"` instead.
+
+## 9. Tool loop runtime reminders and terminal status
+
+The runtime keeps lightweight per-run state while executing a tool loop.
+
+- Non-interactive execution never prompts for approval. Confirm/unknown tools fail immediately with the tool name, reason, and a remediation hint unless the user explicitly passed `--auto-approve` for the matching category.
+- `--auto-approve` accepts `read`, `write`, `shell`, `exec`, `git`, `dangerous`, and `all`. Shell execution is intentionally excluded from the default non-interactive behavior and requires `--auto-approve shell` or `--auto-approve all`.
+- The loop records the last successful tool, the last tool result summary, the last successful shell command and exit code, repeated failed shell commands, and files that may have been changed by built-in file mutators.
+- If the same shell command fails twice consecutively, the next model input includes a reminder not to retry it again and to inspect the error, fix files, or provide the final answer.
+- If a verification command such as `go test ./...` succeeds, the next model input reminds the model not to rerun the same verification unless files changed. A duplicate successful verification may be skipped by runtime state.
+- When two turns or fewer remain before `--max-turns`, the next input asks the model to minimize tool use and provide the final answer when implementation or verification is complete. On the final turn it asks the model to avoid tools unless unavoidable.
+- If the loop still reaches `--max-turns`, the error includes the last successful tool, last tool result summary, last successful shell command with exit code, possibly changed files, and an explicit note that no final answer was generated.
+
+These reminders apply to both `prompt_json` and `llamacpp_tools` protocols.
+## 10. Public contract preservation in distributed prompts
+
+The distributed prompt templates include public contract preservation guidance. This is a permanent runtime instruction, not a smoke-test prompt workaround.
+
+- `templates/coderenga.d/prompts/default.md` contains `Public contract preservation`.
+- `templates/coderenga.d/modes/coder.md` contains `Public contract discipline`.
+- The templates are embedded by `templates/embed.go` and are written by `coderenga --init` into new `coderenga.d/` directories.
+- Existing `coderenga.d/` directories are not overwritten automatically. There is currently no `--init --force` and no automatic prompt migration.
+
+Existing users should copy the new sections into their local `coderenga.d/prompts/default.md` and `coderenga.d/modes/coder.md`, then restart CodeRenga or run `/reload-prompts` in the REPL.
+
+The guidance requires exact preservation of user-visible contract names such as JSON keys, CLI flags, output formats, file names, function names, exported identifiers, and documented examples. For example, a spec field named `line` must remain `line`, not `line_number`, `lineNo`, or `lineNum`.

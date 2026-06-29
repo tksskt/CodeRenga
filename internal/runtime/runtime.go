@@ -27,6 +27,7 @@ import (
 type Options struct {
 	BinaryDir, CWD, ConfigPath, StateDir, Mode, Profile, Model string
 	NoPersist, DryRun, NonInteractive                          bool
+	AutoApprove                                                []string
 	MaxTurns                                                   int
 }
 type Runtime struct {
@@ -38,6 +39,7 @@ type Runtime struct {
 	LLM                                                         *llm.Client
 	CWD, BinaryDir, ConfigPath, Mode, Profile, Model, SessionID string
 	DryRun                                                      bool
+	AutoApprove                                                 map[string]bool
 	MCP                                                         map[string]mcp.Client
 	Approve                                                     tools.Approver
 	Transcript                                                  []TranscriptEntry
@@ -84,7 +86,11 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	if e != nil {
 		return nil, e
 	}
-	rt := &Runtime{Config: cfg, Prompts: pm, Store: store, Registry: tools.NewRegistry(), LLM: llm.New(), CWD: o.CWD, BinaryDir: o.BinaryDir, ConfigPath: o.ConfigPath, Mode: mode, Profile: profile, Model: model, SessionID: fmt.Sprintf("%d", time.Now().UnixNano()), DryRun: o.DryRun, MCP: map[string]mcp.Client{}, ToolDiagnostics: map[string]string{}, MaxTurns: o.MaxTurns}
+	autoApprove, e := tools.NormalizeAutoApprove(o.AutoApprove)
+	if e != nil {
+		return nil, e
+	}
+	rt := &Runtime{Config: cfg, Prompts: pm, Store: store, Registry: tools.NewRegistry(), LLM: llm.New(), CWD: o.CWD, BinaryDir: o.BinaryDir, ConfigPath: o.ConfigPath, Mode: mode, Profile: profile, Model: model, SessionID: fmt.Sprintf("%d", time.Now().UnixNano()), DryRun: o.DryRun, AutoApprove: autoApprove, MCP: map[string]mcp.Client{}, ToolDiagnostics: map[string]string{}, MaxTurns: o.MaxTurns}
 	initialized := false
 	defer func() {
 		if !initialized {
@@ -102,7 +108,7 @@ func New(ctx context.Context, o Options) (*Runtime, error) {
 	}
 	rt.loadPlugins(false)
 	rt.loadMCP(ctx, false)
-	rt.Executor = &tools.Executor{Registry: rt.Registry, Store: store, NonInteractive: o.NonInteractive, PolicyDecision: func(name string) tools.Level {
+	rt.Executor = &tools.Executor{Registry: rt.Registry, Store: store, NonInteractive: o.NonInteractive, AutoApprove: autoApprove, PolicyDecision: func(name string) tools.Level {
 		value, configured := cfg.ToolPolicies[name]
 		if !configured {
 			return tools.Allow
@@ -293,12 +299,19 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 	lastResults := map[string]string{}
 	var callHistory []string
 	var dryRunSkipped []tools.Request
+	loopState := newLoopRuntimeState()
 	malformedRepairUsed := false
 	taskStartRepairUsed := false
 	loopRepairUsed := false
 	maxTurns := rt.maxTurns()
 turnLoop:
 	for turn := 0; turn < maxTurns; turn++ {
+		remaining := maxTurns - turn
+		if remaining <= 2 {
+			if _, err := rt.addMessage(ctx, "user", maxTurnReminder(remaining)); err != nil {
+				return err
+			}
+		}
 		msgs, err := rt.context(ctx)
 		if err != nil {
 			return err
@@ -391,9 +404,13 @@ turnLoop:
 			rt.recordTranscript(turn, "tool_call", call.Name, signature, "", "", "")
 			call.Context = tools.Context{CWD: rt.CWD, Mode: rt.Mode, SessionID: rt.SessionID, DryRun: rt.DryRun}
 			rt.recordToolStatus(call.Name, ToolCallRunning)
-			res, err := rt.Executor.Execute(ctx, call)
-			if err != nil {
-				return err
+			res, skipped := loopState.shouldSkipShell(call)
+			var err error
+			if !skipped {
+				res, err = rt.Executor.Execute(ctx, call)
+				if err != nil {
+					return err
+				}
 			}
 			lastResults[signature] = toolResultSummary(res)
 			status := ToolCallDone
@@ -405,10 +422,16 @@ turnLoop:
 			}
 			rt.recordToolStatus(call.Name, status)
 			rt.recordTranscript(turn, "tool_result", call.Name, signature, toolResultSummary(res), res.Error, "")
+			reminders := loopState.afterTool(call, res)
 			body, _ := json.Marshal(res)
 			toolResult := fmt.Sprintf("Tool result for %s:\n%s", call.Name, body)
 			if _, err = rt.addMessage(ctx, "user", toolResult); err != nil {
 				return err
+			}
+			for _, reminder := range reminders {
+				if _, err = rt.addMessage(ctx, "user", reminder); err != nil {
+					return err
+				}
 			}
 			if rt.DryRun && rt.isSideEffectTool(call.Name) {
 				dryRunSkipped = append(dryRunSkipped, call)
@@ -417,7 +440,7 @@ turnLoop:
 			}
 		}
 	}
-	return fmt.Errorf("tool loop exceeded %d turns; calls: %s", maxTurns, strings.Join(callHistory, " -> "))
+	return maxTurnExceededError(maxTurns, callHistory, loopState)
 }
 
 func (rt *Runtime) maxTurns() int {

@@ -17,7 +17,7 @@ type RequestPolicy interface{ Decision(Request) Level }
 type ConfirmationRequiredError struct{ Tool string }
 
 func (e ConfirmationRequiredError) Error() string {
-	return fmt.Sprintf("operation requires confirmation, but --non-interactive is enabled.\ntool: %s", e.Tool)
+	return fmt.Sprintf("tool %s requires approval, but --non-interactive is set. Re-run without --non-interactive to approve it interactively, change the mode/tools.json/shell policy, or run with %s.", e.Tool, autoApproveHint(e.Tool))
 }
 
 type Executor struct {
@@ -27,8 +27,70 @@ type Executor struct {
 	ModeDecision   func(string, Tool) Level
 	PolicyDecision func(string) Level
 	NonInteractive bool
+	AutoApprove    map[string]bool
 }
 
+func (e *Executor) autoApproves(tool string) bool {
+	if len(e.AutoApprove) == 0 {
+		return false
+	}
+	if e.AutoApprove["all"] {
+		return true
+	}
+	for _, category := range ToolCategories(tool) {
+		if e.AutoApprove[category] {
+			return true
+		}
+	}
+	return false
+}
+
+func ToolCategories(tool string) []string {
+	switch {
+	case tool == "builtin.read_file" || tool == "builtin.list_files" || tool == "builtin.search_text":
+		return []string{"read"}
+	case tool == "builtin.write_file" || tool == "builtin.apply_patch":
+		return []string{"write"}
+	case tool == "shell.run":
+		return []string{"shell", "exec"}
+	case strings.HasPrefix(tool, "git."):
+		return []string{"git", "read"}
+	case strings.HasPrefix(tool, "plugin.") || strings.HasPrefix(tool, "mcp."):
+		return []string{"dangerous"}
+	default:
+		return []string{"dangerous"}
+	}
+}
+
+func NormalizeAutoApprove(values []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			category := strings.ToLower(strings.TrimSpace(part))
+			if category == "" {
+				continue
+			}
+			switch category {
+			case "all", "read", "write", "shell", "exec", "git", "dangerous":
+				out[category] = true
+			default:
+				return nil, fmt.Errorf("unknown auto-approve category %q", category)
+			}
+		}
+	}
+	return out, nil
+}
+
+func autoApproveHint(tool string) string {
+	category := "dangerous"
+	if categories := ToolCategories(tool); len(categories) > 0 {
+		category = categories[0]
+	}
+	if tool == "shell.run" {
+		category = "shell"
+	}
+	return fmt.Sprintf("--auto-approve %s", category)
+}
 func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	t, ok := e.Registry.Get(req.Name)
 	if !ok {
@@ -75,11 +137,14 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	approved := decision == Allow
 	if decision == Confirm || decision == Unknown {
 		if e.NonInteractive {
-			res := Result{OK: false, Error: "operation requires confirmation in non-interactive mode"}
-			e.record(ctx, req, res, decision, false, 0, policyReasons)
-			return res, ConfirmationRequiredError{Tool: req.Name}
-		}
-		if e.Approver == nil || !e.Approver(req.Name, req.Arguments) {
+			if e.autoApproves(req.Name) {
+				approved = true
+			} else {
+				res := Result{OK: false, Error: fmt.Sprintf("tool %s requires approval, but --non-interactive is set. Run with %s to allow this tool category in non-interactive mode.", req.Name, autoApproveHint(req.Name))}
+				e.record(ctx, req, res, decision, false, 0, policyReasons)
+				return res, ConfirmationRequiredError{Tool: req.Name}
+			}
+		} else if e.Approver == nil || !e.Approver(req.Name, req.Arguments) {
 			res := Result{OK: false, Error: "tool execution was not approved"}
 			e.record(ctx, req, res, decision, false, 0, policyReasons)
 			return res, nil

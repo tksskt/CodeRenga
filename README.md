@@ -111,10 +111,24 @@ Dry-run tool results explicitly report `executed=false`; contradictory model cla
 
 The initial modes use `coder write:allow`, `debug write:confirm`, and `architect/reviewer write:false`. File-mutating tools remain constrained by the cwd sandbox and `tools.json`. `--non-interactive` runs allowed operations but fails confirmation-required operations without prompting or auto-approving them.
 
+For unattended verification, use `--auto-approve <categories>` with `--non-interactive` to explicitly approve confirmation-required categories. Supported categories are `read`, `write`, `shell`, `exec`, `git`, `dangerous`, and `all`; comma-separated values and repeated flags are accepted. Shell execution is never auto-approved by default: use `--auto-approve shell` or `--auto-approve all` only when the task and repository are trusted.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
 
+
+### Updating existing prompt templates
+
+New release binaries embed the templates under `templates/coderenga.d/`, and `coderenga --init` writes those templates into a new `coderenga.d/`. Existing `coderenga.d/` directories are not overwritten automatically, and CodeRenga currently has no `--init --force` or automatic prompt migration.
+
+For an existing environment, update the public-contract guidance manually:
+
+1. Open `coderenga.d/prompts/default.md` and add the `Public contract preservation` section from the current release template.
+2. Open `coderenga.d/modes/coder.md` and add the `Public contract discipline` section from the current release template.
+3. Restart CodeRenga or use `/reload-prompts` in the REPL so the updated prompt files are loaded.
+
+The important rule is that specifications define a public contract: preserve JSON keys, CLI flags, output formats, file names, function names, exported identifiers, and documented examples exactly. For example, if a spec requires `line`, do not emit `line_number`, `lineNo`, or `lineNum`.
 ### llama.cpp native tool calls
 
 The default tool protocol remains `prompt_json`. For llama.cpp server only, a profile can opt into native OpenAI-compatible tool calls with `"toolProtocol":"llamacpp_tools"`. Phase 1 uses non-stream chat completions, sends built-in tool JSON Schemas, defaults `tool_choice` to `auto`, and keeps `parallel_tool_calls:false`. Start `llama-server` with `--jinja` and a tool-aware chat template; otherwise keep using `prompt_json`.
