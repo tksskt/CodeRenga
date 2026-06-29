@@ -239,7 +239,35 @@ jobs:
           set -euo pipefail
           ls -la dist
 
-      - name: Create release
+      - name: Resolve release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES_PATH=".github/release-notes/${RELEASE_TAG}.md"
+          if [ -f "${NOTES_PATH}" ]; then
+            echo "HAS_RELEASE_NOTES=true" >> "$GITHUB_ENV"
+            echo "RELEASE_NOTES_PATH=${NOTES_PATH}" >> "$GITHUB_ENV"
+          else
+            echo "HAS_RELEASE_NOTES=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Create release with curated notes
+        if: env.HAS_RELEASE_NOTES == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: CodeRenga ${{ env.RELEASE_TAG }}
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
+          files: |
+            dist/coderenga-linux-amd64.tar.gz
+            dist/coderenga-windows-amd64.zip
+            dist/coderenga-darwin-amd64.tar.gz
+            dist/coderenga-darwin-arm64.tar.gz
+            dist/checksums.txt
+          overwrite_files: true
+
+      - name: Create release with generated notes
+        if: env.HAS_RELEASE_NOTES != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
