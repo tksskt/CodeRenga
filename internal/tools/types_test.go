@@ -12,3 +12,10 @@ func TestParserRequiresQualifiedName(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+func TestObjectSchemaUsesEmptyRequiredArray(t *testing.T) {
+	schema := ObjectSchema(map[string]any{}, nil)
+	required, ok := schema["required"].([]string)
+	if !ok || len(required) != 0 {
+		t.Fatalf("required=%#v", schema["required"])
+	}
+}

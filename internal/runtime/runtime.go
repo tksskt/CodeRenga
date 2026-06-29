@@ -283,6 +283,9 @@ func (rt *Runtime) RunInstruction(ctx context.Context, instruction string, out i
 			_ = rt.maybeAutoCompact(ctx)
 		}
 	}()
+	if rt.nativeToolsEnabled() {
+		return rt.runLlamaCppTools(ctx, instruction, out)
+	}
 	if _, err := rt.addMessageNoCompact(ctx, "user", instruction); err != nil {
 		return err
 	}

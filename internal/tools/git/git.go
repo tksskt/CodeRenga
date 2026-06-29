@@ -12,9 +12,10 @@ type Tool struct {
 	args []string
 }
 
-func (t Tool) Name() string        { return t.name }
-func (t Tool) Description() string { return t.name }
-func (t Tool) Policy() tools.Level { return tools.Allow }
+func (t Tool) Name() string           { return t.name }
+func (t Tool) Description() string    { return t.name }
+func (t Tool) Policy() tools.Level    { return tools.Allow }
+func (t Tool) Schema() map[string]any { return tools.ObjectSchema(map[string]any{}, nil) }
 func (t Tool) Execute(ctx context.Context, r tools.Request) (tools.Result, error) {
 	cmd := exec.CommandContext(ctx, "git", t.args...)
 	cmd.Dir = r.Context.CWD

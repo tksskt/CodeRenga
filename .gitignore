@@ -169,3 +169,4 @@ __pycache__/
 structure.txt
 files.txt
 status.txt
+.local/llamacpp-tools-verify/

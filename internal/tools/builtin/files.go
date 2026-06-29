@@ -24,6 +24,22 @@ func (t fileTool) Name() string        { return t.name }
 func (t fileTool) Description() string { return t.name }
 func (t fileTool) Policy() tools.Level { return t.policy }
 func (t fileTool) ModifiesFiles() bool { return t.modifies }
+func (t fileTool) Schema() map[string]any {
+	switch t.name {
+	case "builtin.read_file":
+		return tools.ObjectSchema(map[string]any{"path": tools.StringProperty("Relative file path to read.")}, []string{"path"})
+	case "builtin.write_file":
+		return tools.ObjectSchema(map[string]any{"path": tools.StringProperty("Relative file path to write."), "content": tools.StringProperty("Text content to write.")}, []string{"path", "content"})
+	case "builtin.apply_patch":
+		return tools.ObjectSchema(map[string]any{"patch": tools.StringProperty("Unified diff patch.")}, []string{"patch"})
+	case "builtin.list_files":
+		return tools.ObjectSchema(map[string]any{"path": tools.StringProperty("Optional relative directory path.")}, nil)
+	case "builtin.search_text":
+		return tools.ObjectSchema(map[string]any{"pattern": tools.StringProperty("Regular expression to search for.")}, []string{"pattern"})
+	default:
+		return tools.ObjectSchema(map[string]any{}, nil)
+	}
+}
 func (t fileTool) Execute(c context.Context, r tools.Request) (tools.Result, error) {
 	return t.run(c, r)
 }

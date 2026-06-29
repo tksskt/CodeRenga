@@ -24,6 +24,13 @@ type Runner struct {
 func (r *Runner) Name() string        { return "shell.run" }
 func (r *Runner) Description() string { return "Run a segmented shell command." }
 func (r *Runner) Policy() tools.Level { return tools.Allow }
+func (r *Runner) Schema() map[string]any {
+	return tools.ObjectSchema(map[string]any{
+		"command":    tools.StringProperty("Command text to parse and run."),
+		"argv":       tools.StringArrayProperty("Command and arguments for direct execution."),
+		"shell_mode": tools.BoolProperty("Use the platform shell for shell syntax."),
+	}, nil)
+}
 
 // readArgv extracts argv from req.Arguments["argv"], accepting both []string
 // and []any of strings. Returns nil, false for empty or non-string entries.

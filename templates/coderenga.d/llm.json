@@ -8,6 +8,16 @@
       "model": "local-model",
       "temperature": 0.2,
       "maxTokens": 4096
+    },
+    "llamacpp-tools": {
+      "baseURL": "http://127.0.0.1:8080/v1",
+      "apiKey": "no-key",
+      "model": "local-model",
+      "temperature": 0.1,
+      "maxTokens": 4096,
+      "toolProtocol": "llamacpp_tools",
+      "toolChoice": "auto",
+      "parallelToolCalls": false
     }
   }
 }

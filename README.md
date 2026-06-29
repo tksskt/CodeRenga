@@ -114,3 +114,7 @@ The initial modes use `coder write:allow`, `debug write:confirm`, and `architect
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+### llama.cpp native tool calls
+
+The default tool protocol remains `prompt_json`. For llama.cpp server only, a profile can opt into native OpenAI-compatible tool calls with `"toolProtocol":"llamacpp_tools"`. Phase 1 uses non-stream chat completions, sends built-in tool JSON Schemas, defaults `tool_choice` to `auto`, and keeps `parallel_tool_calls:false`. Start `llama-server` with `--jinja` and a tool-aware chat template; otherwise keep using `prompt_json`.

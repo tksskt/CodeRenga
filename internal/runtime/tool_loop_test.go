@@ -385,3 +385,67 @@ func newToolLoopRuntime(t *testing.T, root string, answers []string) (*Runtime, 
 	}
 	return rt, &requests
 }
+
+func TestLlamaCppNativeToolLoopReadsFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("native README"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(requests) == 1 {
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"type":"function","function":{"name":"builtin__read_file","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}`)
+			return
+		}
+		fmt.Fprintln(w, `{"choices":[{"message":{"content":"native summary"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	dir := filepath.Join(root, "coderenga.d")
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "modes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"config.json":        `{"version":1,"defaultMode":"coder","defaultProfile":"test","state":{"database":"coderenga.db"}}`,
+		"llm.json":           fmt.Sprintf(`{"version":1,"profiles":{"test":{"baseURL":%q,"model":"m","toolProtocol":"llamacpp_tools","parallelToolCalls":false}}}`, server.URL),
+		"tools.json":         `{"version":1,"tool_policy":{"builtin.read_file":"allow"},"plugins":{}}`,
+		"prompts/default.md": "system",
+		"prompts/compact.md": "compact",
+		"modes/coder.md":     "---\nname: coder\nwrite: confirm\nshell: policy\nmcp: true\n---\ncode",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt, err := New(context.Background(), Options{BinaryDir: root, CWD: root, NoPersist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "read README", &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "native summary\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests=%d", len(requests))
+	}
+	if requests[0]["stream"] != false || requests[0]["parallel_tool_calls"] != false || requests[0]["tools"] == nil {
+		t.Fatalf("native request missing tools fields: %#v", requests[0])
+	}
+	encoded, _ := json.Marshal(requests[1]["messages"])
+	if !strings.Contains(string(encoded), "native README") || !strings.Contains(string(encoded), "tool_call_id") || !strings.Contains(string(encoded), "call_0") {
+		t.Fatalf("tool result history missing: %s", encoded)
+	}
+}

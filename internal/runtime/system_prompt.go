@@ -10,7 +10,11 @@ import (
 func (rt *Runtime) systemPrompt() string {
 	var b strings.Builder
 	b.WriteString(rt.Prompts.Build(rt.Mode))
-	b.WriteString("\n\nRuntime policy:\n- Tool names are fully qualified.\n- Use tools only when the request explicitly requires file access, search, modification, shell, Git, MCP, or plugins. Answer greetings and general conversation directly without tools.\n- Never invent a path; use a user-supplied path or discover it with a read-only tool.\n- If a tool result says dry-run or executed=false, state that it was not executed and never claim a file was created, updated, or written.\n- To call a tool, output exactly one JSON object with keys \"tool\" and \"arguments\" and no prose or Markdown fence.\n- Example: {\"tool\":\"builtin.read_file\",\"arguments\":{\"path\":\"README.md\"}}\n- Policy order is block > confirm > unknown > allow.\nAvailable tools:\n")
+	if rt.nativeToolsEnabled() {
+		b.WriteString("\n\nRuntime policy:\n- Use the provided tools only when the request requires file access, search, modification, shell, Git, MCP, or plugins.\n- Never invent a path; use a user-supplied path or discover it with a read-only tool.\n- If a tool result says dry-run or executed=false, state that it was not executed and never claim a file was created, updated, or written.\n- After seeing tool results, provide a final answer.\n- Policy order is block > confirm > unknown > allow.\nAvailable tools:\n")
+	} else {
+		b.WriteString("\n\nRuntime policy:\n- Tool names are fully qualified.\n- Use tools only when the request explicitly requires file access, search, modification, shell, Git, MCP, or plugins. Answer greetings and general conversation directly without tools.\n- Never invent a path; use a user-supplied path or discover it with a read-only tool.\n- If a tool result says dry-run or executed=false, state that it was not executed and never claim a file was created, updated, or written.\n- To call a tool, output exactly one JSON object with keys \"tool\" and \"arguments\" and no prose or Markdown fence.\n- Example: {\"tool\":\"builtin.read_file\",\"arguments\":{\"path\":\"README.md\"}}\n- Policy order is block > confirm > unknown > allow.\nAvailable tools:\n")
+	}
 	for _, name := range rt.Registry.Names() {
 		tool, ok := rt.Registry.Info(name)
 		if !ok || !rt.Registry.Enabled(name) {
