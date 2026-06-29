@@ -23,15 +23,16 @@ type Config struct {
 	ToolPolicies   map[string]string
 }
 type Profile struct {
-	BaseURL           string         `json:"baseURL"`
-	APIKey            string         `json:"apiKey"`
-	Model             string         `json:"model"`
-	Temperature       float64        `json:"temperature"`
-	MaxTokens         int            `json:"maxTokens"`
-	ToolProtocol      string         `json:"toolProtocol,omitempty"`
-	ToolChoice        string         `json:"toolChoice,omitempty"`
-	ParallelToolCalls *bool          `json:"parallelToolCalls,omitempty"`
-	ExtraBody         map[string]any `json:"extraBody,omitempty"`
+	BaseURL           string           `json:"baseURL"`
+	APIKey            string           `json:"apiKey"`
+	Model             string           `json:"model"`
+	Temperature       float64          `json:"temperature"`
+	MaxTokens         int              `json:"maxTokens"`
+	ToolProtocol      string           `json:"toolProtocol,omitempty"`
+	ToolChoice        string           `json:"toolChoice,omitempty"`
+	ParallelToolCalls *bool            `json:"parallelToolCalls,omitempty"`
+	ExtraBody         map[string]any   `json:"extraBody,omitempty"`
+	NativeTools       []map[string]any `json:"-"`
 }
 type PromptConfig struct {
 	SystemFiles             []string

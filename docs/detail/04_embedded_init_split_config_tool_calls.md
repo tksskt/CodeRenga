@@ -115,7 +115,12 @@ Phase 1 is intentionally limited to llama.cpp server native tool calls:
 - only tool calls from `message.tool_calls` are executable;
 - JSON-like text in `content` or `reasoning_content` is never parsed as a tool call;
 - built-in tools that expose JSON Schema are sent in the `tools` request field;
-- dot-qualified internal names are converted for transport, for example `builtin.read_file` becomes `builtin__read_file`, and responses are mapped back before execution.
+- if the generated native tool set is empty, `tools`, `tool_choice`, and `parallel_tool_calls` are omitted and the request is treated as a normal non-stream chat completion;
+- `extraBody` is only for additive provider parameters. It cannot override CodeRenga-managed chat body fields: `model`, `messages`, `stream`, `tools`, `tool_choice`, or `parallel_tool_calls`;
+- `stream:false` is always forced by CodeRenga for `llamacpp_tools`. When tools are present, `parallel_tool_calls:false` is also forced for Phase 1;
+- dot-qualified internal names are converted for transport, for example `builtin.read_file` becomes `builtin__read_file`, and responses are mapped back before execution. If two internal names map to the same transport name, native tool set generation fails with an explicit collision error.
+
+The native loop stores assistant tool-call messages and tool results in per-run `nativeHistory` so the next native request has the required OpenAI-compatible trace. The normal conversation store persists the user instruction and final assistant answer only; intermediate native tool-call trace is recorded in the runtime transcript for the current run and is not yet normalized into the durable conversation history. TODO: define a durable normalized native trace before relying on session resume, compaction, or audit flows for mid-loop native tool details.
 
 llama.cpp native tool calling requires `llama-server --jinja` and a tool-aware chat template. If a server does not return `message.tool_calls` for a dummy tool call, use `toolProtocol:"prompt_json"` instead.
 

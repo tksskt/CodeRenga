@@ -21,7 +21,7 @@ func (rt *Runtime) nativeToolsEnabled() bool {
 	return ok && profile.ToolProtocol == "llamacpp_tools"
 }
 
-func (rt *Runtime) llamaCppToolSet() nativeToolSet {
+func (rt *Runtime) llamaCppToolSet() (nativeToolSet, error) {
 	set := nativeToolSet{SafeToInternal: map[string]string{}}
 	for _, name := range rt.Registry.Names() {
 		tool, ok := rt.Registry.Info(name)
@@ -31,22 +31,32 @@ func (rt *Runtime) llamaCppToolSet() nativeToolSet {
 		if rt.modeDecision(rt.Mode, tool) == tools.Block || tools.ParseLevel(rt.Config.ToolPolicies[name]) == tools.Block {
 			continue
 		}
-		schemaProvider, ok := tool.(tools.SchemaProvider)
-		if !ok {
-			continue
+		if err := addNativeTool(&set, name, tool); err != nil {
+			return nativeToolSet{}, err
 		}
-		safe := safeToolName(name)
-		set.SafeToInternal[safe] = name
-		set.Tools = append(set.Tools, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        safe,
-				"description": shortDescription(tool.Description()),
-				"parameters":  schemaProvider.Schema(),
-			},
-		})
 	}
-	return set
+	return set, nil
+}
+
+func addNativeTool(set *nativeToolSet, name string, tool tools.Tool) error {
+	schemaProvider, ok := tool.(tools.SchemaProvider)
+	if !ok {
+		return nil
+	}
+	safe := safeToolName(name)
+	if prev, exists := set.SafeToInternal[safe]; exists && prev != name {
+		return fmt.Errorf("native tool name collision: %q and %q both map to %q", prev, name, safe)
+	}
+	set.SafeToInternal[safe] = name
+	set.Tools = append(set.Tools, map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        safe,
+			"description": shortDescription(tool.Description()),
+			"parameters":  schemaProvider.Schema(),
+		},
+	})
+	return nil
 }
 
 func safeToolName(name string) string { return strings.ReplaceAll(name, ".", "__") }
@@ -71,13 +81,11 @@ func (rt *Runtime) runLlamaCppTools(ctx context.Context, instruction string, out
 		return fmt.Errorf("unknown profile %q", rt.Profile)
 	}
 	profile.Model = rt.Model
-	toolSet := rt.llamaCppToolSet()
-	if profile.ExtraBody == nil {
-		profile.ExtraBody = map[string]any{}
+	toolSet, err := rt.llamaCppToolSet()
+	if err != nil {
+		return err
 	}
-	if len(toolSet.Tools) > 0 {
-		profile.ExtraBody["tools"] = toolSet.Tools
-	}
+	profile.NativeTools = toolSet.Tools
 
 	lastSignature := ""
 	lastResults := map[string]string{}

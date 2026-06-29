@@ -60,18 +60,21 @@ func (c *Client) ChatResult(ctx context.Context, p config.Profile, msgs []Messag
 	if p.MaxTokens > 0 {
 		body["max_tokens"] = p.MaxTokens
 	}
+	for k, v := range p.ExtraBody {
+		if isReservedChatBodyKey(k) {
+			// ExtraBody is for provider-specific additive parameters only; CodeRenga-owned request fields are forced below.
+			continue
+		}
+		body[k] = v
+	}
 	if p.ToolProtocol == "llamacpp_tools" {
 		requestStream = false
 		body["stream"] = false
-		body["tools"] = p.ExtraBody["tools"]
-		body["tool_choice"] = defaultToolChoice(p.ToolChoice)
-		body["parallel_tool_calls"] = false
-		if p.ParallelToolCalls != nil {
-			body["parallel_tool_calls"] = *p.ParallelToolCalls
+		if len(p.NativeTools) > 0 {
+			body["tools"] = p.NativeTools
+			body["tool_choice"] = defaultToolChoice(p.ToolChoice)
+			body["parallel_tool_calls"] = false
 		}
-	}
-	for k, v := range p.ExtraBody {
-		body[k] = v
 	}
 	b, _ := json.Marshal(body)
 	url := strings.TrimRight(p.BaseURL, "/") + "/chat/completions"
@@ -98,6 +101,14 @@ func (c *Client) ChatResult(ctx context.Context, p config.Profile, msgs []Messag
 	return decodeStream(resp.Body, onDelta)
 }
 
+func isReservedChatBodyKey(k string) bool {
+	switch k {
+	case "model", "messages", "stream", "tools", "tool_choice", "parallel_tool_calls":
+		return true
+	default:
+		return false
+	}
+}
 func defaultToolChoice(value string) string {
 	switch strings.TrimSpace(value) {
 	case "none", "required":
