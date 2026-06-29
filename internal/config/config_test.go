@@ -283,3 +283,32 @@ func TestCanonicalWinsOverLegacy(t *testing.T) {
 		t.Fatalf("expected 0 block rules (canonical), got %d", len(c.ShellPolicy.Block))
 	}
 }
+
+func TestProfileNativeToolsIsNotLoadedFromJSON(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "coderenga.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("config.json", `{"version":1,"defaultMode":"coder","defaultProfile":"x","state":{"database":"state.db"}}`)
+	write("llm.json", `{"version":1,"profiles":{"x":{"baseURL":"http://x/v1","model":"m","nativeTools":[{"type":"function"}],"extraBody":{"tools":[{"type":"evil"}],"top_k":40}}}}`)
+	write("mcp.json", `{"version":1,"servers":{}}`)
+	write("tools.json", `{"version":1,"plugins":{}}`)
+	c, _, err := Load(root, root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := c.Profiles["x"]
+	if profile.NativeTools != nil {
+		t.Fatalf("NativeTools must be internal-only and ignored during JSON load: %#v", profile.NativeTools)
+	}
+	if profile.ExtraBody == nil || profile.ExtraBody["tools"] == nil || profile.ExtraBody["top_k"] != float64(40) {
+		t.Fatalf("extraBody should still load as raw additive config: %#v", profile.ExtraBody)
+	}
+}

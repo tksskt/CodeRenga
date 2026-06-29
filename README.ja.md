@@ -125,6 +125,11 @@ architect/reviewer write:false
 
 `--non-interactive` は許可済みの操作を実行しますが、確認が必要な操作はプロンプト表示や自動承認を行わずに失敗します。
 
+## llama.cpp native tool calls
+
+既定の tool protocol は `prompt_json` です。llama.cpp server に限り、profile で `"toolProtocol":"llamacpp_tools"` を指定すると OpenAI 互換の native tool calls を使用できます。Phase 1 は安定性を優先し、非ストリーミング chat completions、CodeRenga が生成した built-in tool JSON Schema、既定 `tool_choice:auto`、強制 `parallel_tool_calls:false` を使用します。`parallelToolCalls:true` を設定しても、llama.cpp Phase 1 では `parallel_tool_calls:false` が送られます。
+
+互換性注意: `extraBody` は provider 固有の追加パラメータ専用です。`model`、`messages`、`stream`、`tools`、`tool_choice`、`parallel_tool_calls` など CodeRenga 管理フィールドは `extraBody` から上書きできません。`tool_choice` を制御する場合は `extraBody.tool_choice` ではなく `toolChoice` を使用してください。`parallelToolCalls` は将来の native-tools provider または llama.cpp tools Phase 2 以降のために予約されています。native `tools` は tool registry と schema から内部生成されるため、JSON 設定の `nativeTools` や `extraBody.tools` で注入・置換することはできません。
 ## ライセンス
 
 MIT License です。詳細は [LICENSE](LICENSE) を参照してください。

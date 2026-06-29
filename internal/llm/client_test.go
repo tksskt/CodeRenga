@@ -34,7 +34,8 @@ func TestLlamaCppToolsNonStreamRequestAndResponse(t *testing.T) {
 		fmt.Fprintln(w, `{"choices":[{"message":{"content":null,"reasoning_content":"thinking","tool_calls":[{"id":"call_x","type":"function","function":{"name":"builtin__read_file","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}`)
 	}))
 	defer s.Close()
-	p := config.Profile{BaseURL: s.URL, Model: "m", ToolProtocol: "llamacpp_tools", ToolChoice: "auto", NativeTools: []map[string]any{{"type": "function"}}}
+	parallel := true
+	p := config.Profile{BaseURL: s.URL, Model: "m", ToolProtocol: "llamacpp_tools", ToolChoice: "auto", ParallelToolCalls: &parallel, NativeTools: []map[string]any{{"type": "function"}}}
 	got, err := New().ChatResult(context.Background(), p, []Message{{Role: "user", Content: "read"}}, true, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,5 +121,46 @@ func TestLlamaCppToolsOmitsToolFieldsWhenNativeToolsEmpty(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPromptJSONReservedExtraBodyKeysCannotOverrideManagedFields(t *testing.T) {
+	var request map[string]any
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintln(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer s.Close()
+	p := config.Profile{
+		BaseURL: s.URL,
+		Model:   "managed-model",
+		ExtraBody: map[string]any{
+			"model":               "evil-model",
+			"messages":            []any{"evil"},
+			"stream":              true,
+			"tools":               []any{map[string]any{"type": "evil"}},
+			"tool_choice":         "required",
+			"parallel_tool_calls": true,
+			"top_p":               0.5,
+		},
+	}
+	if _, err := New().ChatResult(context.Background(), p, []Message{{Role: "user", Content: "hello"}}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if request["model"] != "managed-model" || request["stream"] != false {
+		t.Fatalf("reserved fields were not protected: %#v", request)
+	}
+	if got := request["messages"].([]any)[0].(map[string]any)["content"]; got != "hello" {
+		t.Fatalf("messages overridden: %#v", request["messages"])
+	}
+	for _, key := range []string{"tools", "tool_choice", "parallel_tool_calls"} {
+		if _, ok := request[key]; ok {
+			t.Fatalf("%s should be omitted for prompt_json request: %#v", key, request)
+		}
+	}
+	if request["top_p"] != 0.5 {
+		t.Fatalf("non-reserved extra body field missing: %#v", request)
 	}
 }
