@@ -386,6 +386,144 @@ func newToolLoopRuntime(t *testing.T, root string, answers []string) (*Runtime, 
 	return rt, &requests
 }
 
+func TestLlamaCppNativeConcreteTaskEmptyResponseGetsRecovery(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("native recovery README"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch len(requests) {
+		case 1:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":""},"finish_reason":"stop"}]}`)
+		case 2:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_0","type":"function","function":{"name":"builtin__read_file","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}`)
+		default:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":"native recovered"},"finish_reason":"stop"}]}`)
+		}
+	}))
+	defer server.Close()
+	dir := filepath.Join(root, "coderenga.d")
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "modes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"config.json":        `{"version":1,"defaultMode":"coder","defaultProfile":"test","state":{"database":"coderenga.db"}}`,
+		"llm.json":           fmt.Sprintf(`{"version":1,"profiles":{"test":{"baseURL":%q,"model":"m","toolProtocol":"llamacpp_tools","parallelToolCalls":false}}}`, server.URL),
+		"tools.json":         `{"version":1,"tool_policy":{"builtin.read_file":"allow"},"plugins":{}}`,
+		"prompts/default.md": "system",
+		"prompts/compact.md": "compact",
+		"modes/coder.md":     "---\nname: coder\nwrite: confirm\nshell: policy\nmcp: true\n---\ncode",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt, err := New(context.Background(), Options{BinaryDir: root, CWD: root, NoPersist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "update README implementation", &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "native recovered\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(requests) != 3 {
+		t.Fatalf("requests=%d", len(requests))
+	}
+	encoded, _ := json.Marshal(requests[1]["messages"])
+	if !strings.Contains(string(encoded), "Start the task now") {
+		t.Fatalf("native recovery prompt missing: %s", encoded)
+	}
+	if strings.Contains(string(encoded), `"role":"assistant","content":""`) {
+		t.Fatalf("empty assistant message was sent to llama.cpp recovery: %s", encoded)
+	}
+}
+func TestLlamaCppNativeEmptyFinalAfterToolGetsFinalizeReminder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("native final README"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch len(requests) {
+		case 1:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_0","type":"function","function":{"name":"builtin__read_file","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}`)
+		case 2:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":""},"finish_reason":"stop"}]}`)
+		default:
+			fmt.Fprintln(w, `{"choices":[{"message":{"content":"native finalized"},"finish_reason":"stop"}]}`)
+		}
+	}))
+	defer server.Close()
+	dir := filepath.Join(root, "coderenga.d")
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "modes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"config.json":        `{"version":1,"defaultMode":"coder","defaultProfile":"test","state":{"database":"coderenga.db"}}`,
+		"llm.json":           fmt.Sprintf(`{"version":1,"profiles":{"test":{"baseURL":%q,"model":"m","toolProtocol":"llamacpp_tools","parallelToolCalls":false}}}`, server.URL),
+		"tools.json":         `{"version":1,"tool_policy":{"builtin.read_file":"allow"},"plugins":{}}`,
+		"prompts/default.md": "system",
+		"prompts/compact.md": "compact",
+		"modes/coder.md":     "---\nname: coder\nwrite: confirm\nshell: policy\nmcp: true\n---\ncode",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt, err := New(context.Background(), Options{BinaryDir: root, CWD: root, NoPersist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	var out bytes.Buffer
+	if err := rt.RunInstruction(context.Background(), "update README implementation", &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "native finalized\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(requests) != 3 {
+		t.Fatalf("requests=%d", len(requests))
+	}
+	if requests[2]["tool_choice"] != "required" {
+		t.Fatalf("tool_choice=%#v", requests[2]["tool_choice"])
+	}
+	encoded, _ := json.Marshal(requests[2]["messages"])
+	if !strings.Contains(string(encoded), "previous response had no tool calls and no final answer") || !strings.Contains(string(encoded), "README/documentation") || !strings.Contains(string(encoded), "no successful file edit") {
+		t.Fatalf("empty-final reminder missing: %s", encoded)
+	}
+	if strings.Contains(string(encoded), "Start the task now") {
+		t.Fatalf("used task-start reminder after tool use: %s", encoded)
+	}
+	if strings.Contains(string(encoded), `"role":"assistant","content":""`) {
+		t.Fatalf("empty assistant message was sent to llama.cpp finalization recovery: %s", encoded)
+	}
+}
 func TestLlamaCppNativeToolLoopReadsFile(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("native README"), 0o644); err != nil {

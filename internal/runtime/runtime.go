@@ -217,8 +217,9 @@ func (rt *Runtime) loadPlugins(reload bool) {
 			delete(rt.ToolDiagnostics, name)
 		}
 	}
-	items, _ := plugin.LoadToolsJSON(filepath.Join(rt.BinaryDir, "coderenga.d", "tools.json"))
-	more, _ := plugin.LoadDirectory(filepath.Join(rt.BinaryDir, "coderenga.d", "plugins"))
+	configDir := rt.configDir()
+	items, _ := plugin.LoadToolsJSON(filepath.Join(configDir, "tools.json"))
+	more, _ := plugin.LoadDirectory(filepath.Join(configDir, "plugins"))
 	items = append(items, more...)
 	seen := map[string]bool{}
 	for _, t := range items {
@@ -238,6 +239,15 @@ func (rt *Runtime) loadPlugins(reload bool) {
 			rt.recordToolDiagnostic(name, "tool registration skipped: "+err.Error())
 		}
 	}
+}
+func (rt *Runtime) configDir() string {
+	if rt.ConfigPath != "" {
+		if abs, err := filepath.Abs(rt.ConfigPath); err == nil {
+			return filepath.Dir(abs)
+		}
+		return filepath.Dir(rt.ConfigPath)
+	}
+	return filepath.Join(rt.BinaryDir, "coderenga.d")
 }
 func (rt *Runtime) loadMCP(ctx context.Context, reload bool) {
 	if !rt.Config.MCP.Enabled {

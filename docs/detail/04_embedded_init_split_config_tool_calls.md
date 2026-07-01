@@ -38,6 +38,7 @@ coderenga.d/
 通常起動時に `config.json` または `llm.json` が無い場合は自動生成せず、`--init` を案内する。旧単一ファイル形式を検出した場合も自動移行せず、再初期化または手動移行を案内する。
 
 `--config <path>` は指定した `config.json` を読み、同じディレクトリの `llm.json`、`mcp.json`、`tools.json` を関連設定として扱う。指定ファイルを読めない場合はパスと原因を表示する。
+When --config is used, Plugin Tool loading uses the same configuration directory for tools.json plugins and the adjacent plugins/ directory.
 
 ## 3. Tool Call契約
 
@@ -127,12 +128,17 @@ The native loop stores assistant tool-call messages and tool results in per-run 
 
 llama.cpp native tool calling requires `llama-server --jinja` and a tool-aware chat template. If a server does not return `message.tool_calls` for a dummy tool call, use `toolProtocol:"prompt_json"` instead.
 
+Long native write or patch tasks need enough output budget for full tool arguments. The distributed llama.cpp profile template keeps `maxTokens: 4096` as a conservative default, but the local llama.cpp PDCA run with `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` also verified `maxTokens: 92000` for both a short completion and the TaskLedger long implementation task.
+
 ## 9. Tool loop runtime reminders and terminal status
 
 The runtime keeps lightweight per-run state while executing a tool loop.
 
 - Non-interactive execution never prompts for approval. Confirm/unknown tools fail immediately with the tool name, reason, and a remediation hint unless the user explicitly passed `--auto-approve` for the matching category.
 - `--auto-approve` accepts `read`, `write`, `shell`, `exec`, `git`, `dangerous`, and `all`. Shell execution is intentionally excluded from the default non-interactive behavior and requires `--auto-approve shell` or `--auto-approve all`.
+- If the first generated native response for a concrete repository task is empty and contains no tool calls, the runtime sends the task-start recovery reminder instead of accepting an empty final answer.
+- If a native response becomes empty after at least one tool call, the runtime sends a finalization reminder that asks the model to finish any remaining source, README/documentation, or test work, or provide a concise final answer.
+- If that empty response happens in an implementation/update task before any successful file edit, the next native request uses `tool_choice: required` once to push the model back into tool use instead of another empty final answer.
 - The loop records the last successful tool, the last tool result summary, the last successful shell command and exit code, repeated failed shell commands, and files that may have been changed by built-in file mutators.
 - If the same shell command fails twice consecutively, the next model input includes a reminder not to retry it again and to inspect the error, fix files, or provide the final answer.
 - If a verification command such as `go test ./...` succeeds, the next model input reminds the model not to rerun the same verification unless files changed. A duplicate successful verification may be skipped by runtime state.

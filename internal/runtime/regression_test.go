@@ -111,6 +111,33 @@ func TestCurrentContextTokenLimitDoesNotUseOutputMaxTokensOrSummaryTarget(t *tes
 	}
 }
 
+func TestPluginsLoadFromExplicitConfigDirectory(t *testing.T) {
+	root := t.TempDir()
+	defaultDir := filepath.Join(root, "coderenga.d")
+	explicitDir := filepath.Join(root, "alt")
+	writeMinimalConfigSet(t, defaultDir, "default-model")
+	writeMinimalConfigSet(t, explicitDir, "explicit-model")
+	if err := os.WriteFile(filepath.Join(defaultDir, "tools.json"), []byte(`{"version":1,"plugins":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(explicitDir, "tools.json"), []byte(`{"version":1,"plugins":{"explicit":{"description":"from explicit config","command":"noop","policy":"confirm"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := New(context.Background(), Options{BinaryDir: root, CWD: root, ConfigPath: filepath.Join(explicitDir, "config.json"), NoPersist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	tool, ok := rt.Registry.Info("plugin.explicit")
+	if !ok {
+		t.Fatalf("plugin from explicit config directory was not loaded; tools=%v", rt.Registry.Names())
+	}
+	if tool.Description() != "from explicit config" {
+		t.Fatalf("loaded plugin from wrong directory: %q", tool.Description())
+	}
+}
 func TestInitialPluginDuplicateKeepsFirstRegistration(t *testing.T) {
 	root := t.TempDir()
 	writeMinimalConfigSet(t, filepath.Join(root, "coderenga.d"), "model")
